@@ -25,6 +25,7 @@ export class GameRoom {
   activeBuzzer: string | null = null;
   dailyDoubleWager: number | null = null;
   dailyDoublePlayer: string | null = null;
+  controlSocketIds: Set<string> = new Set();
   createdAt: number = Date.now();
 
   constructor(gameId: string, hostSocketId: string) {
@@ -279,6 +280,35 @@ export class GameRoom {
           }
         : null,
       scores: this.getScores(),
+    };
+  }
+
+  isHost(socketId: string): boolean {
+    return socketId === this.hostSocketId || this.controlSocketIds.has(socketId);
+  }
+
+  addControlSocket(socketId: string): void {
+    this.controlSocketIds.add(socketId);
+  }
+
+  removeControlSocket(socketId: string): void {
+    this.controlSocketIds.delete(socketId);
+  }
+
+  getCurrentAnswerData(): {
+    correctResponse: string;
+    code: string;
+    codeType: string;
+    mnemonic?: string;
+    fact?: string;
+  } | null {
+    if (!this.currentQuestion) return null;
+    return {
+      correctResponse: this.currentQuestion.correctResponse,
+      code: this.currentQuestion.code,
+      codeType: this.currentQuestion.codeType,
+      mnemonic: this.currentQuestion.mnemonic,
+      fact: this.currentQuestion.fact,
     };
   }
 }

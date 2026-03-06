@@ -16,9 +16,36 @@ export function registerSocketHandlers(
     callback({ gameId });
   });
 
+  socket.on(
+    "host:join-control",
+    (
+      { gameId }: { gameId: string },
+      callback: (data: { success: boolean; error?: string }) => void
+    ) => {
+      const room = gameManager.getRoom(gameId);
+      if (!room) {
+        callback({ success: false, error: "Game not found." });
+        return;
+      }
+      room.addControlSocket(socket.id);
+      socket.join(gameId);
+      callback({ success: true });
+
+      // Send current state
+      socket.emit("game:state-sync", room.getSnapshot());
+
+      // If a question is active, also send the answer
+      const answerData = room.getCurrentAnswerData();
+      if (answerData && room.phase !== "lobby" && room.phase !== "board" && room.phase !== "game_over") {
+        socket.emit("game:host-clue-data", answerData);
+      }
+      console.log(`[Game ${gameId}] Control view connected: ${socket.id}`);
+    }
+  );
+
   socket.on("host:start-game", ({ gameId }: { gameId: string }) => {
     const room = gameManager.getRoom(gameId);
-    if (!room || room.hostSocketId !== socket.id) return;
+    if (!room || !room.isHost(socket.id)) return;
     if (room.phase !== "lobby") return;
 
     room.generateBoard();
@@ -36,7 +63,7 @@ export function registerSocketHandlers(
     "host:select-cell",
     ({ gameId, cat, val }: { gameId: string; cat: number; val: number }) => {
       const room = gameManager.getRoom(gameId);
-      if (!room || room.hostSocketId !== socket.id) return;
+      if (!room || !room.isHost(socket.id)) return;
       if (room.phase !== "board") return;
 
       const cell = room.board[cat]?.[val];
@@ -44,6 +71,13 @@ export function registerSocketHandlers(
 
       const question = room.selectCell(cat, val);
       if (!question) return;
+
+      // Send answer data to host + control sockets
+      const answerData = room.getCurrentAnswerData();
+      const hostSockets = [room.hostSocketId, ...room.controlSocketIds];
+      for (const sid of hostSockets) {
+        io.to(sid).emit("game:host-clue-data", answerData);
+      }
 
       // Check for Daily Double
       if (cell.isDailyDouble) {
@@ -89,7 +123,7 @@ export function registerSocketHandlers(
       correct: boolean;
     }) => {
       const room = gameManager.getRoom(gameId);
-      if (!room || room.hostSocketId !== socket.id) return;
+      if (!room || !room.isHost(socket.id)) return;
       if (!room.activeBuzzer) return;
 
       const result = room.judgeAnswer(correct);
@@ -145,7 +179,7 @@ export function registerSocketHandlers(
 
   socket.on("host:reveal-answer", ({ gameId }: { gameId: string }) => {
     const room = gameManager.getRoom(gameId);
-    if (!room || room.hostSocketId !== socket.id) return;
+    if (!room || !room.isHost(socket.id)) return;
 
     room.phase = "answer_reveal";
     const revealData = room.getQuestionRevealData();
@@ -162,7 +196,7 @@ export function registerSocketHandlers(
 
   socket.on("host:return-to-board", ({ gameId }: { gameId: string }) => {
     const room = gameManager.getRoom(gameId);
-    if (!room || room.hostSocketId !== socket.id) return;
+    if (!room || !room.isHost(socket.id)) return;
 
     room.currentQuestion = null;
     room.currentCell = null;
@@ -190,7 +224,7 @@ export function registerSocketHandlers(
 
   socket.on("host:skip-question", ({ gameId }: { gameId: string }) => {
     const room = gameManager.getRoom(gameId);
-    if (!room || room.hostSocketId !== socket.id) return;
+    if (!room || !room.isHost(socket.id)) return;
 
     room.phase = "answer_reveal";
     const revealData = room.getQuestionRevealData();
@@ -205,7 +239,7 @@ export function registerSocketHandlers(
 
   socket.on("host:end-game", ({ gameId }: { gameId: string }) => {
     const room = gameManager.getRoom(gameId);
-    if (!room || room.hostSocketId !== socket.id) return;
+    if (!room || !room.isHost(socket.id)) return;
 
     room.phase = "game_over";
     io.to(gameId).emit("game:phase-change", {
@@ -337,7 +371,10 @@ export function registerSocketHandlers(
   socket.on("disconnect", () => {
     // Check all rooms for this socket
     for (const [gameId, room] of gameManager.getAllRooms()) {
-      if (room.hostSocketId === socket.id) {
+      if (room.controlSocketIds.has(socket.id)) {
+        room.removeControlSocket(socket.id);
+        console.log(`[Game ${gameId}] Control view disconnected`);
+      } else if (room.hostSocketId === socket.id) {
         // Host disconnected — notify players
         io.to(gameId).emit("game:host-disconnected", {});
         console.log(`[Game ${gameId}] Host disconnected`);
