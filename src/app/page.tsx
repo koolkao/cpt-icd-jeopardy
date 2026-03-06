@@ -1,16 +1,22 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { socket } from "@/lib/socket";
 import { motion } from "framer-motion";
 
-export default function JoinPage() {
+function JoinForm() {
+  const searchParams = useSearchParams();
   const [gameCode, setGameCode] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [joining, setJoining] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    const code = searchParams.get("code");
+    if (code) setGameCode(code.toUpperCase());
+  }, [searchParams]);
 
   const handleJoin = () => {
     if (!gameCode.trim() || !name.trim()) {
@@ -121,5 +127,13 @@ export default function JoinPage() {
         Ask the host for the game code displayed on screen
       </motion.p>
     </div>
+  );
+}
+
+export default function JoinPage() {
+  return (
+    <Suspense>
+      <JoinForm />
+    </Suspense>
   );
 }

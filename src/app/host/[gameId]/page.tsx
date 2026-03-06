@@ -11,6 +11,7 @@ import JeopardyBoard from "@/components/board/JeopardyBoard";
 import QuestionReveal from "@/components/board/QuestionReveal";
 import Leaderboard from "@/components/leaderboard/Leaderboard";
 import ConfettiEffect from "@/components/effects/ConfettiEffect";
+import { QRCodeSVG } from "qrcode.react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function HostGamePage() {
@@ -126,14 +127,23 @@ export default function HostGamePage() {
             Pain Management Edition
           </p>
 
-          <div className="mb-8">
+          <div className="mb-8 flex flex-col items-center">
             <p className="text-blue-200 text-sm mb-2">GAME CODE</p>
             <div className="text-6xl md:text-8xl font-mono font-bold gold-text tracking-[0.3em] bg-black/20 rounded-xl px-8 py-4 inline-block">
               {gameId}
             </div>
-            <p className="text-blue-200/60 text-sm mt-2">
-              Players: go to this URL and enter the code above
+            <p className="text-blue-200/60 text-sm mt-4 mb-3">
+              Scan to join
             </p>
+            <div className="bg-white rounded-xl p-3 inline-block">
+              <QRCodeSVG
+                value={`https://cpt-icd-jeopardy-production.up.railway.app/?code=${gameId}`}
+                size={180}
+                level="M"
+                bgColor="#ffffff"
+                fgColor="#0a1628"
+              />
+            </div>
           </div>
 
           <div className="mb-8 bg-white/5 rounded-xl p-6 max-w-md mx-auto">
