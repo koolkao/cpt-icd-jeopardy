@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --jeopardy-blue: #060CE9;
+  --jeopardy-dark: #000B8D;
+  --jeopardy-navy: #00006E;
+  --jeopardy-gold: #FFCC00;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: #000B8D;
+  color: white;
+  overflow-x: hidden;
+}
+
+/* Jeopardy board cell styling */
+.board-cell {
+  @apply relative flex items-center justify-center cursor-pointer select-none;
+  @apply border-2 border-black/30 transition-all duration-200;
+  background: linear-gradient(180deg, #1a10d1 0%, #060CE9 50%, #0008b8 100%);
+}
+
+.board-cell:hover:not(.revealed) {
+  @apply brightness-125 scale-[1.02];
+  z-index: 10;
+}
+
+.board-cell.revealed {
+  @apply cursor-default opacity-30;
+  background: #1a1a2e;
+}
+
+.category-header {
+  @apply flex items-center justify-center text-center p-2;
+  @apply font-display font-bold text-white uppercase tracking-wide;
+  background: linear-gradient(180deg, #060CE9 0%, #000B8D 100%);
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Gold text for money values */
+.gold-text {
+  color: #FFCC00;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.6), 0 0 10px rgba(255, 204, 0, 0.3);
+}
+
+/* Buzz button glow */
+.buzz-glow {
+  box-shadow: 0 0 30px rgba(220, 38, 38, 0.4), 0 0 60px rgba(220, 38, 38, 0.2);
+}
+
+/* Mnemonic card */
+.mnemonic-card {
+  @apply rounded-lg p-4 border-2;
+  border-color: #FFCC00;
+  background: rgba(255, 204, 0, 0.1);
+}
+
+/* Fact card */
+.fact-card {
+  @apply rounded-lg p-4 border-2;
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+/* Streak fire animation */
+@keyframes flicker {
+  0%, 100% { transform: scaleY(1); opacity: 1; }
+  50% { transform: scaleY(1.1); opacity: 0.8; }
+}
+
+.streak-fire {
+  animation: flicker 0.3s ease-in-out infinite;
+}
+
+/* Score change flash */
+.score-positive {
+  @apply text-green-400;
+  animation: scoreFlash 0.8s ease-out;
+}
+
+.score-negative {
+  @apply text-red-400;
+  animation: scoreFlash 0.8s ease-out;
+}
+
+@keyframes scoreFlash {
+  0% { transform: scale(1.5); }
+  100% { transform: scale(1); }
+}
