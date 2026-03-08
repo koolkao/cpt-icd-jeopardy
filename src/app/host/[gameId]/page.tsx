@@ -63,10 +63,23 @@ export default function HostGamePage() {
     "game:scores-updated": ({ scores }) => {
       store.setScores(scores);
     },
+    "game:judge-result": ({ correct }: { correct: boolean }) => {
+      setJudgeFeedback(correct ? "correct" : "incorrect");
+      if (correct) {
+        sound.playCorrect();
+        setShowConfettiBurst(true);
+        setTimeout(() => setShowConfettiBurst(false), 100);
+      } else {
+        sound.playWrong();
+      }
+      setTimeout(() => setJudgeFeedback(null), 1500);
+    },
     "game:buzz-open": () => {
       store.setBuzzedPlayer(null);
+      store.setNoMoreBuzzers(false);
     },
     "game:no-more-buzzers": () => {
+      store.setBuzzedPlayer(null);
       store.setNoMoreBuzzers(true);
     },
     "room:cell-revealed": ({ cat, val }) => {
@@ -88,17 +101,10 @@ export default function HostGamePage() {
   const handleJudge = useCallback(
     (correct: boolean) => {
       socket.emit("host:judge-answer", { gameId, correct });
-      setJudgeFeedback(correct ? "correct" : "incorrect");
-      if (correct) {
-        sound.playCorrect();
-        setShowConfettiBurst(true);
-        setTimeout(() => setShowConfettiBurst(false), 100);
-      } else {
-        sound.playWrong();
-      }
-      setTimeout(() => setJudgeFeedback(null), 1500);
+      // Visual feedback is now triggered by the game:judge-result event
+      // so it works regardless of whether judged from host page or control page
     },
-    [gameId, sound]
+    [gameId]
   );
 
   const handleRevealAnswer = useCallback(() => {

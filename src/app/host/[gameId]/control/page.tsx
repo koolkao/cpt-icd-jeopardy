@@ -15,6 +15,8 @@ export default function HostControlPage() {
   const [authenticated, setAuthenticated] = useState(false);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [judgeFeedback, setJudgeFeedback] = useState<"correct" | "incorrect" | null>(null);
+  const [lastJudgedName, setLastJudgedName] = useState("");
 
   const handleLogin = useCallback(() => {
     if (!socket.connected) {
@@ -78,7 +80,17 @@ export default function HostControlPage() {
     "game:scores-updated": ({ scores }) => {
       store.setScores(scores);
     },
+    "game:judge-result": ({ correct, playerName }: { correct: boolean; playerName: string }) => {
+      setJudgeFeedback(correct ? "correct" : "incorrect");
+      setLastJudgedName(playerName);
+      setTimeout(() => setJudgeFeedback(null), 1500);
+    },
+    "game:buzz-open": () => {
+      store.setBuzzedPlayer(null);
+      store.setNoMoreBuzzers(false);
+    },
     "game:no-more-buzzers": () => {
+      store.setBuzzedPlayer(null);
       store.setNoMoreBuzzers(true);
     },
   });
@@ -324,6 +336,27 @@ export default function HostControlPage() {
 
               {/* ANSWER - the main reason for this view */}
               <AnswerCard />
+
+              {/* Judge feedback banner */}
+              <AnimatePresence>
+                {judgeFeedback && (
+                  <motion.div
+                    key="judge-fb"
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    className={`rounded-xl p-4 text-center font-bold text-lg ${
+                      judgeFeedback === "correct"
+                        ? "bg-green-500/20 border-2 border-green-400/50 text-green-400"
+                        : "bg-red-500/20 border-2 border-red-400/50 text-red-400"
+                    }`}
+                  >
+                    {judgeFeedback === "correct" ? "✅ " : "❌ "}
+                    {lastJudgedName}:{" "}
+                    {judgeFeedback === "correct" ? "CORRECT!" : "NOPE!"}
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Buzz status + controls */}
               <div className="space-y-3">

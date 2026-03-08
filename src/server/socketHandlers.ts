@@ -146,6 +146,13 @@ export function registerSocketHandlers(
       // Broadcast scores
       io.to(gameId).emit("game:scores-updated", { scores });
 
+      // Broadcast who answered and whether they were correct
+      io.to(gameId).emit("game:judge-result", {
+        playerName: result.player.name,
+        correct,
+        delta: result.delta,
+      });
+
       if (correct) {
         // Correct: move to answer reveal
         room.phase = "answer_reveal";
