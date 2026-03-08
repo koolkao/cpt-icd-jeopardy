@@ -153,9 +153,11 @@ export function registerSocketHandlers(
           wasCorrect: true,
         });
       } else {
-        // Incorrect: try next buzzer
+        // Incorrect: mark this player as failed and try next buzzer
+        room.failedBuzzers.add(result.player.id);
         const next = room.nextBuzzer();
         if (next) {
+          // Someone else already in the queue — let them answer
           room.phase = "buzz_locked";
           io.to(gameId).emit("game:buzz-in", {
             playerId: next.playerId,
@@ -164,11 +166,18 @@ export function registerSocketHandlers(
           io.to(next.playerId).emit("game:your-turn", {
             timeLimit: ANSWER_TIMER_MS,
           });
-        } else {
-          // No more buzzers — host can reveal or skip
+        } else if (room.allPlayersFailed()) {
+          // Everyone has tried and failed
           room.activeBuzzer = null;
           room.phase = "question";
           io.to(gameId).emit("game:no-more-buzzers", {});
+        } else {
+          // Re-open buzzers for remaining players
+          room.activeBuzzer = null;
+          room.phase = "buzz_open";
+          io.to(gameId).emit("game:buzz-open", {
+            duration: TIMER_DURATION_MS,
+          });
         }
       }
       console.log(

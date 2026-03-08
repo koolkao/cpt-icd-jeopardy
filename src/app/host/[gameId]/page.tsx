@@ -318,9 +318,17 @@ export default function HostGamePage() {
           )}
 
           {!store.buzzedPlayer && !store.noMoreBuzzers && (
-            <p className="text-blue-200/60 text-lg animate-pulse">
-              Waiting for buzz-ins...
-            </p>
+            <div className="space-y-3">
+              <p className="text-blue-200/60 text-lg animate-pulse">
+                Waiting for buzz-ins...
+              </p>
+              <button
+                onClick={handleRevealAnswer}
+                className="px-6 py-2 rounded-lg bg-white/10 border border-white/20 text-white/60 font-medium text-sm hover:bg-white/20 hover:text-white transition-colors"
+              >
+                Give Up (Reveal Answer)
+              </button>
+            </div>
           )}
         </div>
 

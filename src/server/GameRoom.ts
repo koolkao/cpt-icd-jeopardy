@@ -23,6 +23,7 @@ export class GameRoom {
   currentCell: { cat: number; val: number } | null = null;
   buzzQueue: { playerId: string; timestamp: number }[] = [];
   activeBuzzer: string | null = null;
+  failedBuzzers: Set<string> = new Set();
   dailyDoubleWager: number | null = null;
   dailyDoublePlayer: string | null = null;
   controlSocketIds: Set<string> = new Set();
@@ -144,13 +145,15 @@ export class GameRoom {
     this.currentQuestion = this.questionGrid[cat]?.[val] ?? null;
     this.buzzQueue = [];
     this.activeBuzzer = null;
+    this.failedBuzzers.clear();
 
     return this.currentQuestion;
   }
 
   buzz(playerId: string): number {
-    // Don't allow double-buzzing
+    // Don't allow double-buzzing or re-buzzing after a wrong answer
     if (this.buzzQueue.some((b) => b.playerId === playerId)) return -1;
+    if (this.failedBuzzers.has(playerId)) return -1;
     this.buzzQueue.push({ playerId, timestamp: Date.now() });
     return this.buzzQueue.length - 1; // position (0 = first)
   }
@@ -281,6 +284,15 @@ export class GameRoom {
         : null,
       scores: this.getScores(),
     };
+  }
+
+  allPlayersFailed(): boolean {
+    for (const player of this.players.values()) {
+      if (player.isConnected && !this.failedBuzzers.has(player.id)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   isHost(socketId: string): boolean {

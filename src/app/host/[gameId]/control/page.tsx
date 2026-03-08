@@ -328,6 +328,18 @@ export default function HostControlPage() {
                     Waiting for buzz-ins...
                   </p>
                 )}
+
+                {/* Give Up — always available during question/buzz phases */}
+                {!store.noMoreBuzzers && (
+                  <div className="pt-2 border-t border-white/10">
+                    <button
+                      onClick={handleRevealAnswer}
+                      className="w-full py-2 rounded-lg bg-white/10 border border-white/20 text-white/70 font-medium text-sm hover:bg-white/20 hover:text-white transition-colors"
+                    >
+                      Give Up (Reveal Answer)
+                    </button>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
