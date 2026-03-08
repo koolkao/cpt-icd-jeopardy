@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useParams } from "next/navigation";
 import { socket } from "@/lib/socket";
 import { useHostStore } from "@/stores/hostStore";
@@ -19,6 +19,8 @@ export default function HostGamePage() {
   const gameId = params.gameId as string;
   const store = useHostStore();
   const sound = useSound();
+  const [judgeFeedback, setJudgeFeedback] = useState<"correct" | "incorrect" | null>(null);
+  const [showConfettiBurst, setShowConfettiBurst] = useState(false);
 
   useEffect(() => {
     store.setGameId(gameId);
@@ -61,6 +63,9 @@ export default function HostGamePage() {
     "game:scores-updated": ({ scores }) => {
       store.setScores(scores);
     },
+    "game:buzz-open": () => {
+      store.setBuzzedPlayer(null);
+    },
     "game:no-more-buzzers": () => {
       store.setNoMoreBuzzers(true);
     },
@@ -83,11 +88,15 @@ export default function HostGamePage() {
   const handleJudge = useCallback(
     (correct: boolean) => {
       socket.emit("host:judge-answer", { gameId, correct });
+      setJudgeFeedback(correct ? "correct" : "incorrect");
       if (correct) {
         sound.playCorrect();
+        setShowConfettiBurst(true);
+        setTimeout(() => setShowConfettiBurst(false), 100);
       } else {
         sound.playWrong();
       }
+      setTimeout(() => setJudgeFeedback(null), 1500);
     },
     [gameId, sound]
   );
@@ -250,7 +259,52 @@ export default function HostGamePage() {
     store.phase === "daily_double"
   ) {
     return (
-      <div className="min-h-screen flex flex-col p-6 bg-gradient-to-b from-jeopardy-navy via-jeopardy-dark to-jeopardy-blue">
+      <div className="min-h-screen flex flex-col p-6 bg-gradient-to-b from-jeopardy-navy via-jeopardy-dark to-jeopardy-blue relative overflow-hidden">
+        {/* Confetti burst on correct */}
+        <ConfettiEffect trigger={showConfettiBurst} />
+
+        {/* Full-screen judge feedback overlay */}
+        <AnimatePresence>
+          {judgeFeedback && (
+            <motion.div
+              key="judge-feedback"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className={`fixed inset-0 z-50 flex items-center justify-center pointer-events-none ${
+                judgeFeedback === "correct"
+                  ? "bg-green-500/20"
+                  : "bg-red-500/20"
+              }`}
+            >
+              <motion.div
+                initial={{ scale: 0, rotate: -20 }}
+                animate={{ scale: 1, rotate: 0 }}
+                exit={{ scale: 0, opacity: 0 }}
+                transition={{ type: "spring", damping: 10, stiffness: 200 }}
+                className="text-center"
+              >
+                <div className={`text-[10rem] md:text-[14rem] leading-none ${
+                  judgeFeedback === "correct" ? "drop-shadow-[0_0_40px_rgba(34,197,94,0.6)]" : "drop-shadow-[0_0_40px_rgba(239,68,68,0.6)]"
+                }`}>
+                  {judgeFeedback === "correct" ? "✅" : "❌"}
+                </div>
+                <motion.p
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.15 }}
+                  className={`text-4xl md:text-6xl font-display font-bold mt-4 ${
+                    judgeFeedback === "correct" ? "text-green-400" : "text-red-400"
+                  }`}
+                >
+                  {judgeFeedback === "correct" ? "CORRECT!" : "NOPE!"}
+                </motion.p>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Category and value */}
         <div className="text-center mb-6">
           <p className="text-blue-200 text-sm uppercase tracking-wider">
@@ -265,7 +319,11 @@ export default function HostGamePage() {
         <div className="flex-1 flex items-center justify-center px-4">
           <motion.p
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            animate={judgeFeedback === "incorrect" ? {
+              opacity: 1,
+              x: [0, -10, 10, -10, 10, 0],
+            } : { opacity: 1 }}
+            transition={judgeFeedback === "incorrect" ? { duration: 0.4 } : undefined}
             className="text-2xl md:text-4xl lg:text-5xl text-white text-center font-display leading-relaxed max-w-4xl"
           >
             {store.currentClue}
@@ -286,13 +344,13 @@ export default function HostGamePage() {
               <div className="flex gap-4 justify-center">
                 <button
                   onClick={() => handleJudge(true)}
-                  className="px-8 py-3 rounded-lg bg-correct text-white font-bold text-lg hover:bg-green-400 transition-colors"
+                  className="px-8 py-4 rounded-xl bg-correct text-white font-bold text-xl hover:bg-green-400 hover:scale-105 transition-all shadow-lg shadow-green-500/20"
                 >
                   ✓ Correct
                 </button>
                 <button
                   onClick={() => handleJudge(false)}
-                  className="px-8 py-3 rounded-lg bg-incorrect text-white font-bold text-lg hover:bg-red-400 transition-colors"
+                  className="px-8 py-4 rounded-xl bg-incorrect text-white font-bold text-xl hover:bg-red-400 hover:scale-105 transition-all shadow-lg shadow-red-500/20"
                 >
                   ✗ Incorrect
                 </button>
@@ -301,34 +359,58 @@ export default function HostGamePage() {
           )}
 
           {!store.buzzedPlayer && store.noMoreBuzzers && (
-            <div className="flex gap-4 justify-center">
-              <button
-                onClick={handleRevealAnswer}
-                className="px-8 py-3 rounded-lg bg-jeopardy-gold text-jeopardy-navy font-bold text-lg hover:bg-jeopardy-gold-light transition-colors"
-              >
-                Reveal Answer
-              </button>
-              <button
-                onClick={handleSkip}
-                className="px-6 py-3 rounded-lg bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition-colors"
-              >
-                Skip
-              </button>
-            </div>
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-3"
+            >
+              <p className="text-xl text-red-300/80 font-semibold">
+                No one got it!
+              </p>
+              <div className="flex gap-4 justify-center">
+                <button
+                  onClick={handleRevealAnswer}
+                  className="px-8 py-3 rounded-lg bg-jeopardy-gold text-jeopardy-navy font-bold text-lg hover:bg-jeopardy-gold-light transition-colors"
+                >
+                  Reveal Answer
+                </button>
+                <button
+                  onClick={handleSkip}
+                  className="px-6 py-3 rounded-lg bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition-colors"
+                >
+                  Skip
+                </button>
+              </div>
+            </motion.div>
           )}
 
           {!store.buzzedPlayer && !store.noMoreBuzzers && (
-            <div className="space-y-3">
-              <p className="text-blue-200/60 text-lg animate-pulse">
-                Waiting for buzz-ins...
-              </p>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="space-y-3"
+            >
+              {judgeFeedback === "incorrect" || (!store.buzzedPlayer && store.phase === "buzz_open" && store.scores.some(() => true)) ? (
+                <motion.p
+                  key="anyone-else"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="text-2xl md:text-3xl text-jeopardy-gold font-display font-bold animate-pulse"
+                >
+                  Anyone else? Buzz in!
+                </motion.p>
+              ) : (
+                <p className="text-blue-200/60 text-lg animate-pulse">
+                  Waiting for buzz-ins...
+                </p>
+              )}
               <button
                 onClick={handleRevealAnswer}
                 className="px-6 py-2 rounded-lg bg-white/10 border border-white/20 text-white/60 font-medium text-sm hover:bg-white/20 hover:text-white transition-colors"
               >
                 Give Up (Reveal Answer)
               </button>
-            </div>
+            </motion.div>
           )}
         </div>
 

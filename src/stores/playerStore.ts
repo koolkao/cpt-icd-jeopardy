@@ -19,6 +19,7 @@ interface PlayerState {
   buzzPosition: number | null;
   isMyTurn: boolean;
   lastResult: { correct: boolean; delta: number } | null;
+  failedThisQuestion: boolean;
   revealData: QuestionRevealData | null;
   scores: PlayerScore[];
   buzzedPlayerName: string | null;
@@ -54,6 +55,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   buzzPosition: null,
   isMyTurn: false,
   lastResult: null,
+  failedThisQuestion: false,
   revealData: null,
   scores: [],
   buzzedPlayerName: null,
@@ -68,6 +70,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       buzzPosition: null,
       isMyTurn: false,
       lastResult: null,
+      failedThisQuestion: false,
       revealData: null,
       buzzedPlayerName: null,
     }),
@@ -88,6 +91,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       lastResult: { correct, delta },
       score: newScore,
       isMyTurn: false,
+      failedThisQuestion: !correct,
     }),
   setRevealData: (data) => set({ revealData: data }),
   setScores: (scores) => {
@@ -118,6 +122,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       buzzPosition: null,
       isMyTurn: false,
       lastResult: null,
+      failedThisQuestion: false,
       revealData: null,
       scores: [],
       buzzedPlayerName: null,

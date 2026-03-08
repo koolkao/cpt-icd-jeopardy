@@ -46,6 +46,8 @@ export default function PlayerGamePage() {
     "game:buzz-open": () => {
       store.setBuzzable(true);
       store.setHasBuzzed(false);
+      store.setMyTurn(false);
+      store.setBuzzedPlayerName(null);
     },
     "game:buzz-result": ({ position, isFirst }) => {
       store.setBuzzResult(position, isFirst);
@@ -272,6 +274,20 @@ export default function PlayerGamePage() {
                 </p>
                 <p className="text-blue-200 text-sm">
                   Say your answer out loud!
+                </p>
+              </motion.div>
+            ) : store.failedThisQuestion ? (
+              <motion.div
+                key="failed"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-center"
+              >
+                <p className="text-lg text-red-400 font-semibold mb-1">
+                  Not quite!
+                </p>
+                <p className="text-blue-200/60 text-sm">
+                  Waiting for other players...
                 </p>
               </motion.div>
             ) : store.hasBuzzed ? (
