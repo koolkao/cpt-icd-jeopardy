@@ -187,7 +187,7 @@ export default function HostGamePage() {
             href={`/host/${gameId}/control`}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-6 inline-block text-blue-200/60 text-sm underline hover:text-blue-200 transition-colors"
+            className="mt-6 block text-blue-200/60 text-sm underline hover:text-blue-200 transition-colors"
           >
             Open Host Control (see answers)
           </a>
