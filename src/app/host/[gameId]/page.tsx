@@ -375,20 +375,23 @@ export default function HostGamePage() {
 
       {/* Scores bar */}
       <div className="px-4 py-2 bg-black/30 flex flex-wrap justify-center gap-3">
-        {store.scores.map((s, i) => (
-          <div
-            key={s.id}
-            className={`px-3 py-1 rounded-full text-sm font-medium ${
-              i === 0
-                ? "bg-jeopardy-gold/20 text-jeopardy-gold border border-jeopardy-gold/30"
-                : "bg-white/5 text-white/70"
-            }`}
-          >
-            {i === 0 && "👑 "}
-            {s.name}: ${s.score.toLocaleString()}
-            {s.streak >= 3 && " 🔥"}
-          </div>
-        ))}
+        {store.scores.map((s, i) => {
+          const isLeader = i === 0 && s.score > 0 && (store.scores.length === 1 || s.score > store.scores[1].score);
+          return (
+            <div
+              key={s.id}
+              className={`px-3 py-1 rounded-full text-sm font-medium ${
+                isLeader
+                  ? "bg-jeopardy-gold/20 text-jeopardy-gold border border-jeopardy-gold/30"
+                  : "bg-white/5 text-white/70"
+              }`}
+            >
+              {isLeader && "👑 "}
+              {s.name}: ${s.score.toLocaleString()}
+              {s.streak >= 3 && " 🔥"}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

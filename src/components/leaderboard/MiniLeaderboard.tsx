@@ -22,6 +22,7 @@ export default function MiniLeaderboard({
       <AnimatePresence>
         {scores.map((s, i) => {
           const isMe = s.name.toLowerCase() === myName.toLowerCase();
+          const isLeader = i === 0 && s.score > 0 && (scores.length === 1 || s.score > scores[1].score);
           return (
             <motion.div
               key={s.id}
@@ -34,7 +35,7 @@ export default function MiniLeaderboard({
             >
               <div className="flex items-center gap-2">
                 <span className="text-blue-200/50 w-5 text-right text-xs">
-                  {i === 0 ? "👑" : `#${i + 1}`}
+                  {isLeader ? "👑" : `#${i + 1}`}
                 </span>
                 <span
                   className={

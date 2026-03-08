@@ -37,6 +37,7 @@ function ScoreRow({
     if (rank === 1) return isGameOver ? "👑" : "🥇";
     if (rank === 2) return "🥈";
     if (rank === 3) return "🥉";
+    if (rank === 0) return "—";
     return `#${rank}`;
   };
 
@@ -70,6 +71,7 @@ function ScoreRow({
 }
 
 export default function Leaderboard({ scores, isGameOver }: LeaderboardProps) {
+  const hasLeader = scores.length > 0 && scores[0].score > 0 && (scores.length === 1 || scores[0].score > scores[1].score);
   return (
     <div className="w-full max-w-lg mx-auto space-y-2">
       <AnimatePresence>
@@ -77,7 +79,7 @@ export default function Leaderboard({ scores, isGameOver }: LeaderboardProps) {
           <ScoreRow
             key={player.id}
             player={player}
-            rank={i + 1}
+            rank={hasLeader ? i + 1 : 0}
             isGameOver={isGameOver}
           />
         ))}
