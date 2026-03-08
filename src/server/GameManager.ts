@@ -13,14 +13,14 @@ function generateCode(length: number = 4): string {
 export class GameManager {
   private rooms: Map<string, GameRoom> = new Map();
 
-  createRoom(hostSocketId: string): string {
+  createRoom(hostSocketId: string, gameType: string): string {
     let gameId: string;
     // Ensure unique game code
     do {
       gameId = generateCode();
     } while (this.rooms.has(gameId));
 
-    const room = new GameRoom(gameId, hostSocketId);
+    const room = new GameRoom(gameId, hostSocketId, gameType);
     this.rooms.set(gameId, room);
     return gameId;
   }

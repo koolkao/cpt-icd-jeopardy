@@ -18,6 +18,8 @@ interface AnswerData {
 
 interface ControlState {
   gameId: string | null;
+  gameTitle: string;
+  gameSubtitle: string;
   phase: GamePhase;
   players: Player[];
   scores: PlayerScore[];
@@ -32,6 +34,7 @@ interface ControlState {
   wasCorrect: boolean;
 
   setGameId: (id: string) => void;
+  setGameMeta: (title: string, subtitle: string) => void;
   setPhase: (phase: GamePhase) => void;
   setPlayers: (players: Player[]) => void;
   addPlayer: (player: Player) => void;
@@ -46,6 +49,8 @@ interface ControlState {
 
 export const useControlStore = create<ControlState>((set) => ({
   gameId: null,
+  gameTitle: "JEOPARDY!",
+  gameSubtitle: "",
   phase: "lobby",
   players: [],
   scores: [],
@@ -60,6 +65,7 @@ export const useControlStore = create<ControlState>((set) => ({
   wasCorrect: false,
 
   setGameId: (id) => set({ gameId: id }),
+  setGameMeta: (title, subtitle) => set({ gameTitle: title, gameSubtitle: subtitle }),
   setPhase: (phase) => set({ phase, noMoreBuzzers: false }),
   setPlayers: (players) => set({ players }),
   addPlayer: (player) =>

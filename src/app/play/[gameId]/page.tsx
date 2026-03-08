@@ -30,6 +30,7 @@ export default function PlayerGamePage() {
     "game:phase-change": (data) => {
       store.setPhase(data.phase);
       if (data.scores) store.setScores(data.scores);
+      if (data.gameMeta) store.setGameMeta(data.gameMeta.title, data.gameMeta.subtitle);
       if (data.clue) {
         store.setClue(data.clue, data.category, data.pointValue);
       }
@@ -77,6 +78,7 @@ export default function PlayerGamePage() {
     "game:state-sync": (snapshot) => {
       store.setPhase(snapshot.phase);
       if (snapshot.scores) store.setScores(snapshot.scores);
+      if (snapshot.gameMeta) store.setGameMeta(snapshot.gameMeta.title, snapshot.gameMeta.subtitle);
     },
   });
 
@@ -98,7 +100,7 @@ export default function PlayerGamePage() {
           className="text-center"
         >
           <h1 className="text-3xl font-display font-bold gold-text mb-2">
-            JEOPARDY!
+            {store.gameTitle || "JEOPARDY!"}
           </h1>
           <p className="text-xl text-white mb-8">
             Welcome, <span className="gold-text font-bold">{name}</span>!
@@ -350,7 +352,7 @@ export default function PlayerGamePage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gradient-to-b from-jeopardy-navy via-jeopardy-dark to-jeopardy-blue">
       <div className="text-center mb-6">
-        <h2 className="text-2xl font-display gold-text mb-1">JEOPARDY!</h2>
+        <h2 className="text-2xl font-display gold-text mb-1">{store.gameTitle || "JEOPARDY!"}</h2>
         <p className="text-blue-200/60 text-sm">
           Host is selecting a question...
         </p>

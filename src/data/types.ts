@@ -26,6 +26,20 @@ export interface CategoryDef {
   shortName: string;
 }
 
+export interface GameConfig {
+  id: string;
+  title: string;
+  subtitle: string;
+  password: string;
+  categories: CategoryDef[];
+  questions: Question[];
+}
+
+export interface GameMeta {
+  title: string;
+  subtitle: string;
+}
+
 export type GamePhase =
   | "lobby"
   | "board"
@@ -91,6 +105,7 @@ export interface GameStateSnapshot {
   currentCell: { cat: number; val: number } | null;
   buzzedPlayer: { id: string; name: string } | null;
   scores: PlayerScore[];
+  gameMeta: GameMeta;
 }
 
 // Point values for each difficulty level

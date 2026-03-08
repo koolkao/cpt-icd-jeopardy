@@ -51,10 +51,12 @@ export default function HostControlPage() {
       store.setPhase(snapshot.phase);
       if (snapshot.scores) store.setScores(snapshot.scores);
       if (snapshot.players) store.setPlayers(snapshot.players);
+      if (snapshot.gameMeta) store.setGameMeta(snapshot.gameMeta.title, snapshot.gameMeta.subtitle);
     },
     "game:phase-change": (data) => {
       store.setPhase(data.phase);
       if (data.scores) store.setScores(data.scores);
+      if (data.gameMeta) store.setGameMeta(data.gameMeta.title, data.gameMeta.subtitle);
       if (data.clue) {
         store.setClue(data.clue, data.category, data.pointValue);
       }

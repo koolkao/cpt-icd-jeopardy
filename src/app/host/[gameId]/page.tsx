@@ -42,6 +42,7 @@ export default function HostGamePage() {
       store.setPhase(data.phase);
       if (data.board) store.setBoard(data.board);
       if (data.scores) store.setScores(data.scores);
+      if (data.gameMeta) store.setGameMeta(data.gameMeta.title, data.gameMeta.subtitle);
       if (data.clue) {
         store.setQuestion(data.clue, data.category, data.pointValue, data.cell);
       }
@@ -136,10 +137,10 @@ export default function HostGamePage() {
           className="text-center"
         >
           <h1 className="text-4xl md:text-6xl font-display font-bold gold-text mb-2">
-            CPT & ICD-10 JEOPARDY!
+            {store.gameTitle}
           </h1>
           <p className="text-blue-200 text-lg mb-8">
-            Pain Management Edition
+            {store.gameSubtitle}
           </p>
 
           <div className="mb-8 flex flex-col items-center">
@@ -445,7 +446,7 @@ export default function HostGamePage() {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2">
         <h1 className="text-lg font-display gold-text">
-          CPT & ICD-10 JEOPARDY!
+          {store.gameTitle}
         </h1>
         <div className="flex items-center gap-4">
           <span className="text-blue-200/60 text-sm">

@@ -5,6 +5,8 @@ import { GamePhase, PlayerScore, QuestionRevealData } from "@/data/types";
 
 interface PlayerState {
   gameId: string | null;
+  gameTitle: string;
+  gameSubtitle: string;
   playerId: string | null;
   playerName: string;
   phase: GamePhase;
@@ -25,6 +27,7 @@ interface PlayerState {
   buzzedPlayerName: string | null;
 
   // Actions
+  setGameMeta: (title: string, subtitle: string) => void;
   setJoined: (gameId: string, playerId: string, name: string) => void;
   setPhase: (phase: GamePhase) => void;
   setClue: (clue: string, category: string, value: number) => void;
@@ -41,6 +44,8 @@ interface PlayerState {
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   gameId: null,
+  gameTitle: "JEOPARDY!",
+  gameSubtitle: "",
   playerId: null,
   playerName: "",
   phase: "lobby",
@@ -60,6 +65,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   scores: [],
   buzzedPlayerName: null,
 
+  setGameMeta: (title, subtitle) => set({ gameTitle: title, gameSubtitle: subtitle }),
   setJoined: (gameId, playerId, name) =>
     set({ gameId, playerId, playerName: name }),
   setPhase: (phase) =>
@@ -108,6 +114,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   reset: () =>
     set({
       gameId: null,
+      gameTitle: "JEOPARDY!",
+      gameSubtitle: "",
       playerId: null,
       playerName: "",
       phase: "lobby",

@@ -51,14 +51,11 @@ function JoinForm() {
         className="text-center mb-8"
       >
         <h1 className="text-4xl md:text-6xl font-display font-bold gold-text mb-2">
-          CPT & ICD-10
+          Medical Code
         </h1>
         <h2 className="text-3xl md:text-5xl font-display font-bold text-white">
           JEOPARDY!
         </h2>
-        <p className="text-blue-200 mt-2 text-sm md:text-base">
-          Pain Management Edition
-        </p>
       </motion.div>
 
       <motion.div

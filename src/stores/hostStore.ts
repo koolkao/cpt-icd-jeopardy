@@ -12,6 +12,8 @@ import {
 
 interface HostState {
   gameId: string | null;
+  gameTitle: string;
+  gameSubtitle: string;
   phase: GamePhase;
   players: Player[];
   board: CellState[][];
@@ -29,6 +31,7 @@ interface HostState {
 
   // Actions
   setGameId: (id: string) => void;
+  setGameMeta: (title: string, subtitle: string) => void;
   setPhase: (phase: GamePhase) => void;
   addPlayer: (player: Player) => void;
   removePlayer: (id: string) => void;
@@ -44,6 +47,8 @@ interface HostState {
 
 const initialState = {
   gameId: null as string | null,
+  gameTitle: "JEOPARDY!",
+  gameSubtitle: "",
   phase: "lobby" as GamePhase,
   players: [] as Player[],
   board: [] as CellState[][],
@@ -64,6 +69,7 @@ export const useHostStore = create<HostState>((set) => ({
   ...initialState,
 
   setGameId: (id) => set({ gameId: id }),
+  setGameMeta: (title, subtitle) => set({ gameTitle: title, gameSubtitle: subtitle }),
   setPhase: (phase) => set({ phase, noMoreBuzzers: false }),
   addPlayer: (player) =>
     set((s) => ({ players: [...s.players, player] })),

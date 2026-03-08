@@ -1,7 +1,7 @@
 import { Server, Socket } from "socket.io";
 import { GameManager } from "./GameManager";
 import { POINT_VALUES, TIMER_DURATION_MS, ANSWER_TIMER_MS } from "../data/types";
-import { HOST_CONTROL_PASSWORD } from "../data/questions";
+import { getGameConfig } from "../data/games";
 
 export function registerSocketHandlers(
   io: Server,
@@ -10,10 +10,15 @@ export function registerSocketHandlers(
 ) {
   // ─── HOST EVENTS ───
 
-  socket.on("host:create-game", (callback: (data: { gameId: string }) => void) => {
-    const gameId = gameManager.createRoom(socket.id);
+  socket.on("host:create-game", ({ gameType }: { gameType: string }, callback: (data: { gameId: string }) => void) => {
+    const config = getGameConfig(gameType);
+    if (!config) {
+      console.error(`Unknown game type: ${gameType}`);
+      return;
+    }
+    const gameId = gameManager.createRoom(socket.id, gameType);
     socket.join(gameId);
-    console.log(`[Game ${gameId}] Created by host ${socket.id}`);
+    console.log(`[Game ${gameId}] Created by host ${socket.id} (${config.title} — ${config.subtitle})`);
     callback({ gameId });
   });
 
@@ -23,13 +28,14 @@ export function registerSocketHandlers(
       { gameId, password }: { gameId: string; password: string },
       callback: (data: { success: boolean; error?: string }) => void
     ) => {
-      if (password !== HOST_CONTROL_PASSWORD) {
-        callback({ success: false, error: "Incorrect password." });
-        return;
-      }
       const room = gameManager.getRoom(gameId);
       if (!room) {
         callback({ success: false, error: "Game not found." });
+        return;
+      }
+      const config = getGameConfig(room.gameType);
+      if (!config || password !== config.password) {
+        callback({ success: false, error: "Incorrect password." });
         return;
       }
       room.addControlSocket(socket.id);
@@ -60,6 +66,7 @@ export function registerSocketHandlers(
       phase: "board",
       board: room.getBoardData(),
       scores: room.getScores(),
+      gameMeta: room.getGameMeta(),
     });
     console.log(`[Game ${gameId}] Started with ${room.players.size} players`);
   });

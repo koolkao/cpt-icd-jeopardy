@@ -1,5 +1,6 @@
 import {
   GamePhase,
+  GameMeta,
   Player,
   CellState,
   PlayerScore,
@@ -9,11 +10,12 @@ import {
   POINT_VALUES,
   Question,
 } from "../data/types";
-import { questionBank, categories } from "../data/questions";
+import { getGameConfig } from "../data/games";
 
 export class GameRoom {
   gameId: string;
   hostSocketId: string;
+  gameType: string;
   phase: GamePhase = "lobby";
   players: Map<string, Player> = new Map();
   board: CellState[][] = [];
@@ -29,9 +31,10 @@ export class GameRoom {
   controlSocketIds: Set<string> = new Set();
   createdAt: number = Date.now();
 
-  constructor(gameId: string, hostSocketId: string) {
+  constructor(gameId: string, hostSocketId: string, gameType: string) {
     this.gameId = gameId;
     this.hostSocketId = hostSocketId;
+    this.gameType = gameType;
   }
 
   addPlayer(socketId: string, name: string): Player | null {
@@ -100,14 +103,17 @@ export class GameRoom {
   }
 
   generateBoard(): void {
-    this.categories = categories.map((c) => c.name);
+    const config = getGameConfig(this.gameType);
+    if (!config) throw new Error(`Unknown game type: ${this.gameType}`);
+
+    this.categories = config.categories.map((c) => c.name);
     this.board = [];
     this.questionGrid = [];
 
     for (let catIdx = 0; catIdx < 6; catIdx++) {
       this.board[catIdx] = [];
       this.questionGrid[catIdx] = [];
-      const catQuestions = questionBank.filter(
+      const catQuestions = config.questions.filter(
         (q) => q.category === this.categories[catIdx]
       );
 
@@ -283,6 +289,7 @@ export class GameRoom {
           }
         : null,
       scores: this.getScores(),
+      gameMeta: this.getGameMeta(),
     };
   }
 
@@ -293,6 +300,14 @@ export class GameRoom {
       }
     }
     return true;
+  }
+
+  getGameMeta(): GameMeta {
+    const config = getGameConfig(this.gameType);
+    return {
+      title: config?.title ?? "JEOPARDY!",
+      subtitle: config?.subtitle ?? "",
+    };
   }
 
   isHost(socketId: string): boolean {
