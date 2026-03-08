@@ -1,6 +1,7 @@
 import { Server, Socket } from "socket.io";
 import { GameManager } from "./GameManager";
 import { POINT_VALUES, TIMER_DURATION_MS, ANSWER_TIMER_MS } from "../data/types";
+import { HOST_CONTROL_PASSWORD } from "../data/questions";
 
 export function registerSocketHandlers(
   io: Server,
@@ -19,9 +20,13 @@ export function registerSocketHandlers(
   socket.on(
     "host:join-control",
     (
-      { gameId }: { gameId: string },
+      { gameId, password }: { gameId: string; password: string },
       callback: (data: { success: boolean; error?: string }) => void
     ) => {
+      if (password !== HOST_CONTROL_PASSWORD) {
+        callback({ success: false, error: "Incorrect password." });
+        return;
+      }
       const room = gameManager.getRoom(gameId);
       if (!room) {
         callback({ success: false, error: "Game not found." });

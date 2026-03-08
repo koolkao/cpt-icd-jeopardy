@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useParams } from "next/navigation";
 import { socket } from "@/lib/socket";
 import { useControlStore } from "@/stores/controlStore";
@@ -12,10 +12,11 @@ export default function HostControlPage() {
   const params = useParams();
   const gameId = params.gameId as string;
   const store = useControlStore();
+  const [authenticated, setAuthenticated] = useState(false);
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    store.setGameId(gameId);
-
+  const handleLogin = useCallback(() => {
     if (!socket.connected) {
       socket.connect();
     }
@@ -23,10 +24,13 @@ export default function HostControlPage() {
     const joinControl = () => {
       socket.emit(
         "host:join-control",
-        { gameId },
+        { gameId, password },
         (res: { success: boolean; error?: string }) => {
-          if (!res.success) {
-            console.error("Failed to join as control:", res.error);
+          if (res.success) {
+            setAuthenticated(true);
+            store.setGameId(gameId);
+          } else {
+            setError(res.error || "Failed to join.");
           }
         }
       );
@@ -37,12 +41,8 @@ export default function HostControlPage() {
     } else {
       socket.once("connect", joinControl);
     }
-
-    return () => {
-      socket.off("connect", joinControl);
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameId]);
+  }, [gameId, password]);
 
   useSocket({
     "game:state-sync": (snapshot) => {
@@ -113,6 +113,50 @@ export default function HostControlPage() {
   const handleEndGame = useCallback(() => {
     socket.emit("host:end-game", { gameId });
   }, [gameId]);
+
+  // ─── PASSWORD GATE ───
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-8 bg-gradient-to-b from-jeopardy-navy via-jeopardy-dark to-jeopardy-blue">
+        <div className="w-full max-w-sm space-y-4">
+          <h1 className="text-2xl font-display font-bold gold-text text-center mb-2">
+            HOST CONTROL
+          </h1>
+          <p className="text-blue-200/60 text-sm text-center mb-4">
+            Enter password to view answers
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleLogin();
+            }}
+            className="space-y-3"
+          >
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setError("");
+              }}
+              placeholder="Password"
+              autoFocus
+              className="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/40 focus:outline-none focus:border-jeopardy-gold/50 focus:ring-1 focus:ring-jeopardy-gold/30"
+            />
+            {error && (
+              <p className="text-red-400 text-sm text-center">{error}</p>
+            )}
+            <button
+              type="submit"
+              className="w-full py-3 rounded-lg bg-jeopardy-gold text-jeopardy-navy font-bold text-lg hover:bg-jeopardy-gold-light transition-colors"
+            >
+              Enter
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   // ─── ANSWER CARD (reusable) ───
   const AnswerCard = () => {

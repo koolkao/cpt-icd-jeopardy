@@ -1,5 +1,8 @@
 import { Question, CategoryDef } from "./types";
 
+// Password required to access the host control panel (shows answers)
+export const HOST_CONTROL_PASSWORD = "pain123";
+
 export const categories: CategoryDef[] = [
   { name: "Epidural Injections", shortName: "Epidurals" },
   { name: "Joint Injections", shortName: "Joints" },
