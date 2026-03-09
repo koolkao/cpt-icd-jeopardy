@@ -13,12 +13,14 @@ const CANVAS_H = GRID_H * CELL_SIZE;
 // Player viewport size (fits ~375px phone portrait)
 const PLAYER_CANVAS_W = 375;
 const PLAYER_CANVAS_H = 550;
-const CAMERA_LERP_SPEED = 0.15;
 
 // Minimap dimensions
 const MINIMAP_W = 80;
 const MINIMAP_H = Math.round(MINIMAP_W * (GRID_H / GRID_W));
 const MINIMAP_MARGIN = 8;
+
+// Camera snap threshold — stop lerping below this distance (px)
+const CAMERA_SNAP_THRESHOLD = 0.5;
 
 // Particle effect for collections
 interface Particle {
@@ -62,6 +64,7 @@ export default function ArenaCanvas({
   const particlesRef = useRef<Particle[]>([]);
   const rafRef = useRef<number>(0);
   const cameraRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const lastFrameRef = useRef<number>(0);
 
   const cellSize = cameraFollow ? PLAYER_CELL_SIZE : CELL_SIZE;
   const canvasW = cameraFollow ? PLAYER_CANVAS_W : CANVAS_W;
@@ -93,6 +96,12 @@ export default function ArenaCanvas({
     const now = Date.now();
     const tickProgress = Math.min(1, (now - state.lastTickTime) / 100);
 
+    // Delta time for frame-rate independent lerp
+    const dt = lastFrameRef.current ? Math.min(now - lastFrameRef.current, 50) : 16;
+    lastFrameRef.current = now;
+    // Exponential decay factor: ~8 per second smoothing
+    const lerpFactor = 1 - Math.exp(-8 * dt / 1000);
+
     // Process events for particles
     for (const evt of state.events) {
       if (evt.type === "collect_correct") {
@@ -115,15 +124,29 @@ export default function ArenaCanvas({
         const targetX = head.x * cellSize + cellSize / 2 - canvasW / 2;
         const targetY = head.y * cellSize + cellSize / 2 - canvasH / 2;
 
-        // Lerp camera toward target
-        cameraRef.current.x += (targetX - cameraRef.current.x) * CAMERA_LERP_SPEED;
-        cameraRef.current.y += (targetY - cameraRef.current.y) * CAMERA_LERP_SPEED;
+        const dx = targetX - cameraRef.current.x;
+        const dy = targetY - cameraRef.current.y;
+
+        // Snap if close enough, otherwise lerp with delta-time
+        if (Math.abs(dx) < CAMERA_SNAP_THRESHOLD && Math.abs(dy) < CAMERA_SNAP_THRESHOLD) {
+          cameraRef.current.x = targetX;
+          cameraRef.current.y = targetY;
+        } else {
+          cameraRef.current.x += dx * lerpFactor;
+          cameraRef.current.y += dy * lerpFactor;
+        }
       }
 
-      // Clamp to arena bounds
-      camOffsetX = Math.max(0, Math.min(arenaW - canvasW, cameraRef.current.x));
-      camOffsetY = Math.max(0, Math.min(arenaH - canvasH, cameraRef.current.y));
+      // Clamp to arena bounds (round to avoid sub-pixel jitter)
+      camOffsetX = Math.round(Math.max(0, Math.min(arenaW - canvasW, cameraRef.current.x)));
+      camOffsetY = Math.round(Math.max(0, Math.min(arenaH - canvasH, cameraRef.current.y)));
     }
+
+    // Visible cell range for viewport culling (with 1-cell padding)
+    const visMinCellX = cameraFollow ? Math.max(0, Math.floor(camOffsetX / cellSize) - 1) : 0;
+    const visMaxCellX = cameraFollow ? Math.min(GRID_W, Math.ceil((camOffsetX + canvasW) / cellSize) + 1) : GRID_W;
+    const visMinCellY = cameraFollow ? Math.max(0, Math.floor(camOffsetY / cellSize) - 1) : 0;
+    const visMaxCellY = cameraFollow ? Math.min(GRID_H, Math.ceil((camOffsetY + canvasH) / cellSize) + 1) : GRID_H;
 
     // Clear
     ctx.fillStyle = "#0a1628";
@@ -135,48 +158,47 @@ export default function ArenaCanvas({
       ctx.translate(-camOffsetX, -camOffsetY);
     }
 
-    // Grid lines (subtle)
+    // Grid lines (subtle) — batched into a single path, culled to visible range
     ctx.strokeStyle = "rgba(255, 255, 255, 0.03)";
     ctx.lineWidth = 0.5;
-    for (let x = 0; x <= GRID_W; x++) {
-      ctx.beginPath();
-      ctx.moveTo(x * cellSize, 0);
-      ctx.lineTo(x * cellSize, arenaH);
-      ctx.stroke();
+    ctx.beginPath();
+    for (let x = visMinCellX; x <= visMaxCellX; x++) {
+      const px = x * cellSize;
+      ctx.moveTo(px, visMinCellY * cellSize);
+      ctx.lineTo(px, visMaxCellY * cellSize);
     }
-    for (let y = 0; y <= GRID_H; y++) {
-      ctx.beginPath();
-      ctx.moveTo(0, y * cellSize);
-      ctx.lineTo(arenaW, y * cellSize);
-      ctx.stroke();
+    for (let y = visMinCellY; y <= visMaxCellY; y++) {
+      const py = y * cellSize;
+      ctx.moveTo(visMinCellX * cellSize, py);
+      ctx.lineTo(visMaxCellX * cellSize, py);
     }
+    ctx.stroke();
 
     // Border
     ctx.strokeStyle = "rgba(255, 204, 0, 0.3)";
     ctx.lineWidth = 2;
     ctx.strokeRect(0, 0, arenaW, arenaH);
 
-    // Draw pills
+    // Draw pills — cull to visible viewport
     const pillFontSize = cameraFollow ? 10 : 7;
+    ctx.font = `bold ${pillFontSize}px monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
     for (const pill of state.pills) {
+      if (cameraFollow && (pill.x < visMinCellX || pill.x > visMaxCellX || pill.y < visMinCellY || pill.y > visMaxCellY)) continue;
       const px = pill.x * cellSize;
       const py = pill.y * cellSize;
 
-      // Capsule shape
       ctx.fillStyle = "rgba(255, 255, 255, 0.15)";
       ctx.beginPath();
       ctx.roundRect(px + 1, py + 1, cellSize - 2, cellSize - 2, 4);
       ctx.fill();
 
-      // Code text
       ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-      ctx.font = `bold ${pillFontSize}px monospace`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
       ctx.fillText(pill.code, px + cellSize / 2, py + cellSize / 2);
     }
 
-    // Draw snakes
+    // Draw snakes — cull off-screen segments
     const eyeSize = cameraFollow ? 4 : 3;
     const eyeOffset = cameraFollow ? 8 : 6;
     const pupilRadius = cameraFollow ? 2 : 1.5;
@@ -188,15 +210,14 @@ export default function ArenaCanvas({
       const isInvincible = snake.invincibleUntil > now;
       const alpha = isInvincible ? 0.5 + 0.3 * Math.sin(now / 100) : 1;
 
-      // Body segments
       for (let i = snake.segments.length - 1; i >= 0; i--) {
         const seg = snake.segments[i];
-        const sx = seg.x * cellSize;
-        const sy = seg.y * cellSize;
 
         if (i === 0) {
           // Head — interpolate position
           const prevHead = state.prevSnakeHeads.get(snake.playerId);
+          const sx = seg.x * cellSize;
+          const sy = seg.y * cellSize;
           let drawX = sx;
           let drawY = sy;
           if (prevHead) {
@@ -255,8 +276,15 @@ export default function ArenaCanvas({
             : `${cameraFollow ? 11 : 9}px sans-serif`;
           ctx.textAlign = "center";
           ctx.fillText(snake.playerName, drawX + cellSize / 2, drawY - 4);
+
+          // Reset font for next pill batch if needed
+          ctx.font = `bold ${pillFontSize}px monospace`;
+          ctx.textBaseline = "middle";
         } else {
-          // Body
+          // Body — cull off-screen segments
+          if (cameraFollow && (seg.x < visMinCellX || seg.x > visMaxCellX || seg.y < visMinCellY || seg.y > visMaxCellY)) continue;
+          const sx = seg.x * cellSize;
+          const sy = seg.y * cellSize;
           ctx.globalAlpha = alpha * (0.6 + 0.4 * (1 - i / snake.segments.length));
           ctx.fillStyle = snake.color;
           ctx.beginPath();
