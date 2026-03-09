@@ -324,7 +324,7 @@ export default function HostGamePage() {
             </p>
             <div className="bg-white rounded-xl p-3 inline-block">
               <QRCodeSVG
-                value={`https://cpt-icd-jeopardy-production.up.railway.app/?code=${gameId}`}
+                value={`https://cptgames.up.railway.app/?code=${gameId}`}
                 size={180}
                 level="M"
                 bgColor="#ffffff"
