@@ -94,22 +94,23 @@ export default function ArenaCanvas({
 
     const state = stateRef.current;
     const now = Date.now();
-    const tickProgress = Math.min(1, (now - state.lastTickTime) / 100);
+    const tickMs = 150; // match server tick rate
+    const tickProgress = Math.min(1, (now - state.lastTickTime) / tickMs);
 
     // Delta time for frame-rate independent lerp
     const dt = lastFrameRef.current ? Math.min(now - lastFrameRef.current, 50) : 16;
     lastFrameRef.current = now;
-    // Exponential decay factor: ~8 per second smoothing
     const lerpFactor = 1 - Math.exp(-8 * dt / 1000);
 
-    // Process events for particles
+    // Process events for particles (fewer in player mode)
+    const particleCount = cameraFollow ? 4 : 8;
     for (const evt of state.events) {
       if (evt.type === "collect_correct") {
-        spawnParticles(evt.x, evt.y, "#22c55e", 8);
+        spawnParticles(evt.x, evt.y, "#22c55e", particleCount);
       } else if (evt.type === "collect_wrong") {
-        spawnParticles(evt.x, evt.y, "#ef4444", 8);
+        spawnParticles(evt.x, evt.y, "#ef4444", particleCount);
       } else if (evt.type === "collision" || evt.type === "wall_hit") {
-        spawnParticles(evt.x, evt.y, "#f59e0b", 12);
+        spawnParticles(evt.x, evt.y, "#f59e0b", cameraFollow ? 6 : 12);
       }
     }
     state.events = [];
@@ -127,7 +128,6 @@ export default function ArenaCanvas({
         const dx = targetX - cameraRef.current.x;
         const dy = targetY - cameraRef.current.y;
 
-        // Snap if close enough, otherwise lerp with delta-time
         if (Math.abs(dx) < CAMERA_SNAP_THRESHOLD && Math.abs(dy) < CAMERA_SNAP_THRESHOLD) {
           cameraRef.current.x = targetX;
           cameraRef.current.y = targetY;
@@ -137,7 +137,6 @@ export default function ArenaCanvas({
         }
       }
 
-      // Clamp to arena bounds (round to avoid sub-pixel jitter)
       camOffsetX = Math.round(Math.max(0, Math.min(arenaW - canvasW, cameraRef.current.x)));
       camOffsetY = Math.round(Math.max(0, Math.min(arenaH - canvasH, cameraRef.current.y)));
     }
@@ -158,28 +157,30 @@ export default function ArenaCanvas({
       ctx.translate(-camOffsetX, -camOffsetY);
     }
 
-    // Grid lines (subtle) — batched into a single path, culled to visible range
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.03)";
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    for (let x = visMinCellX; x <= visMaxCellX; x++) {
-      const px = x * cellSize;
-      ctx.moveTo(px, visMinCellY * cellSize);
-      ctx.lineTo(px, visMaxCellY * cellSize);
+    // Grid lines — skip entirely in player mode (barely visible, expensive)
+    if (!cameraFollow) {
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.03)";
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      for (let x = 0; x <= GRID_W; x++) {
+        const px = x * cellSize;
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, arenaH);
+      }
+      for (let y = 0; y <= GRID_H; y++) {
+        const py = y * cellSize;
+        ctx.moveTo(0, py);
+        ctx.lineTo(arenaW, py);
+      }
+      ctx.stroke();
     }
-    for (let y = visMinCellY; y <= visMaxCellY; y++) {
-      const py = y * cellSize;
-      ctx.moveTo(visMinCellX * cellSize, py);
-      ctx.lineTo(visMaxCellX * cellSize, py);
-    }
-    ctx.stroke();
 
     // Border
     ctx.strokeStyle = "rgba(255, 204, 0, 0.3)";
     ctx.lineWidth = 2;
     ctx.strokeRect(0, 0, arenaW, arenaH);
 
-    // Draw pills — cull to visible viewport
+    // Draw pills — cull to visible viewport, use fillRect instead of roundRect in player mode
     const pillFontSize = cameraFollow ? 10 : 7;
     ctx.font = `bold ${pillFontSize}px monospace`;
     ctx.textAlign = "center";
@@ -190,15 +191,19 @@ export default function ArenaCanvas({
       const py = pill.y * cellSize;
 
       ctx.fillStyle = "rgba(255, 255, 255, 0.15)";
-      ctx.beginPath();
-      ctx.roundRect(px + 1, py + 1, cellSize - 2, cellSize - 2, 4);
-      ctx.fill();
+      if (cameraFollow) {
+        ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
+      } else {
+        ctx.beginPath();
+        ctx.roundRect(px + 1, py + 1, cellSize - 2, cellSize - 2, 4);
+        ctx.fill();
+      }
 
       ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
       ctx.fillText(pill.code, px + cellSize / 2, py + cellSize / 2);
     }
 
-    // Draw snakes — cull off-screen segments
+    // Draw snakes — use fillRect for body in player mode, skip per-segment alpha
     const eyeSize = cameraFollow ? 4 : 3;
     const eyeOffset = cameraFollow ? 8 : 6;
     const pupilRadius = cameraFollow ? 2 : 1.5;
@@ -227,45 +232,33 @@ export default function ArenaCanvas({
 
           ctx.globalAlpha = alpha;
           ctx.fillStyle = snake.color;
-          ctx.beginPath();
-          ctx.roundRect(drawX + 1, drawY + 1, cellSize - 2, cellSize - 2, 6);
-          ctx.fill();
+          if (cameraFollow) {
+            ctx.fillRect(drawX + 1, drawY + 1, cellSize - 2, cellSize - 2);
+          } else {
+            ctx.beginPath();
+            ctx.roundRect(drawX + 1, drawY + 1, cellSize - 2, cellSize - 2, 6);
+            ctx.fill();
+          }
 
           // Eyes
           ctx.fillStyle = "white";
           if (snake.direction === "up" || snake.direction === "down") {
-            ctx.beginPath();
-            ctx.arc(drawX + eyeOffset, drawY + cellSize / 2, eyeSize, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.beginPath();
-            ctx.arc(drawX + cellSize - eyeOffset, drawY + cellSize / 2, eyeSize, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillRect(drawX + eyeOffset - eyeSize, drawY + cellSize / 2 - eyeSize, eyeSize * 2, eyeSize * 2);
+            ctx.fillRect(drawX + cellSize - eyeOffset - eyeSize, drawY + cellSize / 2 - eyeSize, eyeSize * 2, eyeSize * 2);
           } else {
-            ctx.beginPath();
-            ctx.arc(drawX + cellSize / 2, drawY + eyeOffset, eyeSize, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.beginPath();
-            ctx.arc(drawX + cellSize / 2, drawY + cellSize - eyeOffset, eyeSize, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillRect(drawX + cellSize / 2 - eyeSize, drawY + eyeOffset - eyeSize, eyeSize * 2, eyeSize * 2);
+            ctx.fillRect(drawX + cellSize / 2 - eyeSize, drawY + cellSize - eyeOffset - eyeSize, eyeSize * 2, eyeSize * 2);
           }
           // Pupils
           ctx.fillStyle = "#111";
           const pdx = snake.direction === "left" ? -pupilShift : snake.direction === "right" ? pupilShift : 0;
           const pdy = snake.direction === "up" ? -pupilShift : snake.direction === "down" ? pupilShift : 0;
           if (snake.direction === "up" || snake.direction === "down") {
-            ctx.beginPath();
-            ctx.arc(drawX + eyeOffset + pdx, drawY + cellSize / 2 + pdy, pupilRadius, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.beginPath();
-            ctx.arc(drawX + cellSize - eyeOffset + pdx, drawY + cellSize / 2 + pdy, pupilRadius, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillRect(drawX + eyeOffset + pdx - pupilRadius, drawY + cellSize / 2 + pdy - pupilRadius, pupilRadius * 2, pupilRadius * 2);
+            ctx.fillRect(drawX + cellSize - eyeOffset + pdx - pupilRadius, drawY + cellSize / 2 + pdy - pupilRadius, pupilRadius * 2, pupilRadius * 2);
           } else {
-            ctx.beginPath();
-            ctx.arc(drawX + cellSize / 2 + pdx, drawY + eyeOffset + pdy, pupilRadius, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.beginPath();
-            ctx.arc(drawX + cellSize / 2 + pdx, drawY + cellSize - eyeOffset + pdy, pupilRadius, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillRect(drawX + cellSize / 2 + pdx - pupilRadius, drawY + eyeOffset + pdy - pupilRadius, pupilRadius * 2, pupilRadius * 2);
+            ctx.fillRect(drawX + cellSize / 2 + pdx - pupilRadius, drawY + cellSize - eyeOffset + pdy - pupilRadius, pupilRadius * 2, pupilRadius * 2);
           }
 
           // Name label above head
@@ -277,19 +270,26 @@ export default function ArenaCanvas({
           ctx.textAlign = "center";
           ctx.fillText(snake.playerName, drawX + cellSize / 2, drawY - 4);
 
-          // Reset font for next pill batch if needed
+          // Reset font for pills
           ctx.font = `bold ${pillFontSize}px monospace`;
           ctx.textBaseline = "middle";
         } else {
-          // Body — cull off-screen segments
+          // Body — cull off-screen segments, use fillRect in player mode, uniform alpha
           if (cameraFollow && (seg.x < visMinCellX || seg.x > visMaxCellX || seg.y < visMinCellY || seg.y > visMaxCellY)) continue;
           const sx = seg.x * cellSize;
           const sy = seg.y * cellSize;
-          ctx.globalAlpha = alpha * (0.6 + 0.4 * (1 - i / snake.segments.length));
-          ctx.fillStyle = snake.color;
-          ctx.beginPath();
-          ctx.roundRect(sx + 2, sy + 2, cellSize - 4, cellSize - 4, 4);
-          ctx.fill();
+          if (cameraFollow) {
+            // Uniform alpha for body in player mode (skip per-segment globalAlpha changes)
+            ctx.globalAlpha = alpha * 0.7;
+            ctx.fillStyle = snake.color;
+            ctx.fillRect(sx + 2, sy + 2, cellSize - 4, cellSize - 4);
+          } else {
+            ctx.globalAlpha = alpha * (0.6 + 0.4 * (1 - i / snake.segments.length));
+            ctx.fillStyle = snake.color;
+            ctx.beginPath();
+            ctx.roundRect(sx + 2, sy + 2, cellSize - 4, cellSize - 4, 4);
+            ctx.fill();
+          }
         }
       }
       ctx.globalAlpha = 1;
@@ -301,16 +301,15 @@ export default function ArenaCanvas({
       const p = particles[i];
       p.x += p.vx;
       p.y += p.vy;
-      p.life -= 0.03;
+      p.life -= 0.04;
       if (p.life <= 0) {
         particles.splice(i, 1);
         continue;
       }
       ctx.globalAlpha = p.life;
       ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
-      ctx.fill();
+      const sz = p.size * p.life;
+      ctx.fillRect(p.x - sz, p.y - sz, sz * 2, sz * 2);
     }
     ctx.globalAlpha = 1;
 
