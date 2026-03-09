@@ -89,7 +89,7 @@ interface HostState {
 
 const initialState = {
   gameId: null as string | null,
-  gameTitle: "JEOPARDY!",
+  gameTitle: "CPT Games",
   gameSubtitle: "",
   gameMode: "jeopardy" as GameMode,
   phase: "lobby" as GamePhase,

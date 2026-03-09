@@ -51,11 +51,8 @@ function JoinForm() {
         className="text-center mb-8"
       >
         <h1 className="text-4xl md:text-6xl font-display font-bold gold-text mb-2">
-          Medical Code
+          CPT Games
         </h1>
-        <h2 className="text-3xl md:text-5xl font-display font-bold text-white">
-          JEOPARDY!
-        </h2>
       </motion.div>
 
       <motion.div

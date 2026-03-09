@@ -3,7 +3,7 @@ import { JeopardyGameConfig } from "../types";
 const painManagement: JeopardyGameConfig = {
   gameMode: "jeopardy",
   id: "pain-management",
-  title: "CPT & ICD-10 JEOPARDY!",
+  title: "CPT & ICD-10 Challenge",
   subtitle: "Pain Management Edition",
   password: "pain123",
   categories: [

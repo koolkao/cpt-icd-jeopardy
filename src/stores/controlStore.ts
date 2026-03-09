@@ -86,7 +86,7 @@ interface ControlState {
 
 export const useControlStore = create<ControlState>((set) => ({
   gameId: null,
-  gameTitle: "JEOPARDY!",
+  gameTitle: "CPT Games",
   gameSubtitle: "",
   gameMode: "jeopardy",
   phase: "lobby",

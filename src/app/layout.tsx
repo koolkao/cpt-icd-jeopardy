@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Medical Code Jeopardy",
-  description: "A multiplayer Jeopardy game for practicing medical billing codes",
+  title: "CPT Games",
+  description: "A multiplayer game for practicing medical billing codes",
 };
 
 export const viewport: Viewport = {

@@ -91,7 +91,7 @@ interface PlayerState {
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   gameId: null,
-  gameTitle: "JEOPARDY!",
+  gameTitle: "CPT Games",
   gameSubtitle: "",
   gameMode: "jeopardy",
   playerId: null,
@@ -241,7 +241,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   reset: () =>
     set({
       gameId: null,
-      gameTitle: "JEOPARDY!",
+      gameTitle: "CPT Games",
       gameSubtitle: "",
       gameMode: "jeopardy",
       playerId: null,

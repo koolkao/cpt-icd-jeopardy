@@ -688,7 +688,7 @@ export class GameRoom {
   getGameMeta(): GameMeta {
     const config = getGameConfig(this.gameType);
     return {
-      title: config?.title ?? "JEOPARDY!",
+      title: config?.title ?? "CPT Games",
       subtitle: config?.subtitle ?? "",
       gameMode: this.gameMode,
     };

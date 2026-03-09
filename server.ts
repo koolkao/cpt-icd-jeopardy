@@ -48,7 +48,7 @@ app.prepare().then(() => {
     const localIP = getLocalIP();
     console.log(`\n  ┌─────────────────────────────────────────┐`);
     console.log(`  │                                         │`);
-    console.log(`  │   Medical Code Jeopardy Server           │`);
+    console.log(`  │   CPT Games Server                       │`);
     console.log(`  │                                         │`);
     console.log(`  │   Local:   http://localhost:${port}        │`);
     console.log(`  │   Network: http://${localIP}:${port}   │`);
