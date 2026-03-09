@@ -71,7 +71,7 @@ export default function HostPage() {
               <p className={`text-sm ${
                 selectedGame === game.id ? "text-jeopardy-gold/70" : "text-blue-200/60"
               }`}>
-                {game.subtitle} — {game.questions.length} questions, {game.categories.length} categories
+                {game.subtitle} — {game.gameMode === "lock-and-key" ? `${game.rounds.length} rounds` : game.gameMode === "code-serpent" ? `${game.scenarios.length} scenarios` : `${game.questions.length} questions`}, {game.categories.length} categories
               </p>
             </button>
           ))}

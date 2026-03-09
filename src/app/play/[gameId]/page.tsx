@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { socket } from "@/lib/socket";
 import { usePlayerStore } from "@/stores/playerStore";
@@ -9,6 +9,24 @@ import { useSound } from "@/hooks/useSound";
 import BuzzButton from "@/components/game/BuzzButton";
 import MiniLeaderboard from "@/components/leaderboard/MiniLeaderboard";
 import ConfettiEffect from "@/components/effects/ConfettiEffect";
+import ScenarioCard from "@/components/lockandkey/ScenarioCard";
+import TimerBar from "@/components/lockandkey/TimerBar";
+import PlayerSelectionGrid from "@/components/lockandkey/PlayerSelectionGrid";
+import ArenaCanvas, { type ArenaStateRef } from "@/components/codeserpent/ArenaCanvas";
+import CountdownOverlay from "@/components/codeserpent/CountdownOverlay";
+import RoundResults from "@/components/codeserpent/RoundResults";
+import JoystickOverlay from "@/components/codeserpent/JoystickOverlay";
+import {
+  LK_TIMER_DURATION_S,
+  type RevealStep,
+  type LockAndKeyPlayerResult,
+  type PlayerScore,
+  type ArenaFullSync,
+  type ArenaTickDelta,
+  type ArenaRoundResult,
+  type Direction,
+  type CodePill,
+} from "@/data/types";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function PlayerGamePage() {
@@ -18,6 +36,23 @@ export default function PlayerGamePage() {
   const name = searchParams.get("name") || "";
   const store = usePlayerStore();
   const sound = useSound();
+
+  // Code Serpent: arena state in ref
+  const arenaStateRef = useRef<ArenaStateRef>({
+    snakes: [],
+    pills: [],
+    timeRemainingS: 0,
+    round: 0,
+    totalRounds: 0,
+    scenarioText: "",
+    events: [],
+    lastTickTime: Date.now(),
+    prevSnakeHeads: new Map(),
+  });
+
+  const handleDirection = useCallback((direction: Direction) => {
+    socket.emit("player:cs-direction", { gameId, direction });
+  }, [gameId]);
 
   useEffect(() => {
     if (gameId && name) {
@@ -30,7 +65,7 @@ export default function PlayerGamePage() {
     "game:phase-change": (data) => {
       store.setPhase(data.phase);
       if (data.scores) store.setScores(data.scores);
-      if (data.gameMeta) store.setGameMeta(data.gameMeta.title, data.gameMeta.subtitle);
+      if (data.gameMeta) store.setGameMeta(data.gameMeta.title, data.gameMeta.subtitle, data.gameMeta.gameMode);
       if (data.clue) {
         store.setClue(data.clue, data.category, data.pointValue);
       }
@@ -40,8 +75,18 @@ export default function PlayerGamePage() {
       if (data.phase === "daily_double") {
         store.setClue(data.clue, data.category, data.pointValue);
       }
+      if (data.phase === "lk_playing" && data.lkRound) {
+        store.setLkRoundData(data.lkRound);
+      }
       if (data.phase === "game_over") {
         sound.playVictory();
+      }
+      // Code Serpent phase data
+      if (data.round && data.totalRounds) {
+        store.setCsRound(data.round, data.totalRounds, data.scenarioText || "", data.category || "");
+        arenaStateRef.current.round = data.round;
+        arenaStateRef.current.totalRounds = data.totalRounds;
+        arenaStateRef.current.scenarioText = data.scenarioText || "";
       }
     },
     "game:buzz-open": () => {
@@ -75,10 +120,75 @@ export default function PlayerGamePage() {
     "game:no-more-buzzers": () => {
       store.setBuzzable(false);
     },
+    "lk:timer-tick": ({ remaining }: { remaining: number }) => {
+      store.setLkTimer(remaining);
+    },
+    "lk:submission-count": (count: { submitted: number; total: number }) => {
+      store.setLkSubmissionCount(count);
+    },
+    "lk:reveal-step": ({ step }: { step: RevealStep }) => {
+      store.addLkRevealStep(step);
+    },
+    "lk:round-complete": ({ results, revealNote, scores }: { results: LockAndKeyPlayerResult[]; revealNote: string; scores: PlayerScore[] }) => {
+      const myResult = results.find((r) => r.playerId === socket.id) || null;
+      store.setLkResult(myResult, revealNote);
+      store.setScores(scores);
+    },
     "game:state-sync": (snapshot) => {
       store.setPhase(snapshot.phase);
       if (snapshot.scores) store.setScores(snapshot.scores);
-      if (snapshot.gameMeta) store.setGameMeta(snapshot.gameMeta.title, snapshot.gameMeta.subtitle);
+      if (snapshot.gameMeta) store.setGameMeta(snapshot.gameMeta.title, snapshot.gameMeta.subtitle, snapshot.gameMeta.gameMode);
+    },
+    // Code Serpent events
+    "cs:tick": (delta: ArenaTickDelta) => {
+      const ref = arenaStateRef.current;
+      ref.prevSnakeHeads.clear();
+      for (const s of ref.snakes) {
+        if (s.segments.length > 0) {
+          ref.prevSnakeHeads.set(s.playerId, { x: s.segments[0].x, y: s.segments[0].y });
+        }
+      }
+      for (const ds of delta.snakes) {
+        const existing = ref.snakes.find((s) => s.playerId === ds.playerId);
+        if (existing) {
+          if (ds.alive && existing.segments.length > 0) {
+            existing.segments.unshift({ x: ds.headX, y: ds.headY });
+            while (existing.segments.length > ds.length) existing.segments.pop();
+          }
+          existing.direction = ds.direction;
+          existing.alive = ds.alive;
+          existing.score = ds.score;
+        }
+      }
+      ref.pills = delta.pills;
+      ref.events.push(...delta.events);
+      ref.timeRemainingS = delta.timeRemainingS;
+      ref.lastTickTime = Date.now();
+    },
+    "cs:sync": (sync: ArenaFullSync) => {
+      const ref = arenaStateRef.current;
+      ref.snakes = sync.snakes;
+      ref.pills = sync.pills;
+      ref.timeRemainingS = sync.timeRemainingS;
+      ref.round = sync.round;
+      ref.lastTickTime = Date.now();
+    },
+    "cs:countdown": ({ secondsLeft }: { secondsLeft: number }) => {
+      store.setCsCountdown(secondsLeft);
+    },
+    "cs:pill-feedback": ({ pill, correct, points }: { pill: CodePill; correct: boolean; points: number }) => {
+      store.setCsLastCollection({ code: pill.code, correct, points });
+      if (navigator.vibrate) navigator.vibrate(correct ? [30] : [50, 30, 50]);
+      setTimeout(() => store.setCsLastCollection(null), 1500);
+    },
+    "cs:round-end": ({ results, teachingNote, correctCodes, scores }: {
+      results: ArenaRoundResult[];
+      teachingNote: string;
+      correctCodes: { code: string; description: string }[];
+      scores: { playerId: string; playerName: string; score: number }[];
+    }) => {
+      const myResult = results.find((r) => r.playerId === socket.id) || null;
+      store.setCsRoundResults(myResult, teachingNote, correctCodes, scores);
     },
   });
 
@@ -89,6 +199,98 @@ export default function PlayerGamePage() {
     // Haptic feedback
     if (navigator.vibrate) navigator.vibrate(50);
   };
+
+  const handleToggleOption = (index: number) => {
+    store.toggleLkSelection(index);
+    if (navigator.vibrate) navigator.vibrate(30);
+  };
+
+  const handleSubmitSelections = () => {
+    store.setLkSubmitted();
+    socket.emit("player:lk-submit-selections", {
+      gameId,
+      selectedIndices: store.lkSelectedIndices,
+    });
+    if (navigator.vibrate) navigator.vibrate(50);
+  };
+
+  // ─── CODE SERPENT: COUNTDOWN ───
+  if (store.phase === "cs_countdown") {
+    return (
+      <CountdownOverlay
+        secondsLeft={store.csCountdown}
+        scenarioText={store.csScenarioText}
+        category={store.csCategory}
+        round={store.csRound}
+        totalRounds={store.csTotalRounds}
+        isPlayer
+      />
+    );
+  }
+
+  // ─── CODE SERPENT: PLAYING ───
+  if (store.phase === "cs_playing") {
+    return (
+      <div className="min-h-screen flex flex-col bg-black relative">
+        {/* Collection feedback */}
+        <AnimatePresence>
+          {store.csLastCollection && (
+            <motion.div
+              key="pill-fb"
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className={`absolute top-2 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-lg font-bold text-base ${
+                store.csLastCollection.correct
+                  ? "bg-green-500/90 text-white"
+                  : "bg-red-500/90 text-white"
+              }`}
+            >
+              {store.csLastCollection.code}: {store.csLastCollection.correct ? "+" : ""}{store.csLastCollection.points}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Arena canvas */}
+        <div className="flex-1 relative">
+          <ArenaCanvas stateRef={arenaStateRef} myPlayerId={socket.id || undefined} showHUD cameraFollow showMinimap />
+
+          {/* Joystick overlay */}
+          <JoystickOverlay onDirection={handleDirection} />
+        </div>
+      </div>
+    );
+  }
+
+  // ─── CODE SERPENT: ROUND RESULTS ───
+  if (store.phase === "cs_round_results") {
+    return (
+      <div className="min-h-screen flex flex-col p-4 overflow-y-auto bg-gradient-to-b from-jeopardy-navy via-jeopardy-dark to-jeopardy-blue">
+        <RoundResults
+          results={store.csScores.map((s) => {
+            const r = store.csMyResult;
+            if (r && r.playerId === s.playerId) return r;
+            return {
+              playerId: s.playerId,
+              playerName: s.playerName,
+              score: s.score,
+              correctCollections: 0,
+              wrongCollections: 0,
+              collisions: 0,
+              roundDelta: 0,
+            };
+          })}
+          teachingNote={store.csTeachingNote}
+          correctCodes={store.csCorrectCodes}
+          scores={store.csScores}
+          round={store.csRound}
+          totalRounds={store.csTotalRounds}
+          myPlayerId={socket.id || undefined}
+          isPlayer
+        />
+      </div>
+    );
+  }
 
   // ─── LOBBY ───
   if (store.phase === "lobby") {
@@ -235,6 +437,138 @@ export default function PlayerGamePage() {
     );
   }
 
+  // ─── LOCK & KEY: PLAYING PHASE ───
+  if (store.phase === "lk_playing" && store.lkRoundData) {
+    return (
+      <div className="min-h-screen flex flex-col p-4 bg-gradient-to-b from-jeopardy-navy via-jeopardy-dark to-jeopardy-blue">
+        {/* Timer */}
+        <TimerBar remaining={store.lkTimerRemaining} total={LK_TIMER_DURATION_S} />
+
+        {/* Scenario */}
+        <ScenarioCard
+          cptCode={store.lkRoundData.cptCode}
+          cptDescription={store.lkRoundData.cptDescription}
+          scenario={store.lkRoundData.scenario}
+          category={store.lkRoundData.category}
+          subcategory={store.lkRoundData.subcategory}
+          compact
+        />
+
+        {/* Selection grid or submitted state */}
+        <div className="flex-1 mt-3">
+          <PlayerSelectionGrid
+            roundData={store.lkRoundData}
+            selectedIndices={store.lkSelectedIndices}
+            hasSubmitted={store.lkHasSubmitted}
+            revealedOptions={store.lkRevealedOptions}
+            onToggle={handleToggleOption}
+            onSubmit={handleSubmitSelections}
+          />
+        </div>
+
+        {/* Submission count */}
+        {store.lkHasSubmitted && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center py-2 text-blue-200/60 text-sm"
+          >
+            {store.lkSubmissionCount.submitted}/{store.lkSubmissionCount.total} submitted
+          </motion.div>
+        )}
+
+        {/* Score */}
+        <div className="text-center py-2 bg-white/5 rounded-lg">
+          <p className="text-xs text-blue-200">
+            Score: <span className="gold-text font-bold">${store.score}</span>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── LOCK & KEY: REVEALING PHASE ───
+  if (store.phase === "lk_revealing" && store.lkRoundData) {
+    return (
+      <div className="min-h-screen flex flex-col p-4 bg-gradient-to-b from-jeopardy-navy via-jeopardy-dark to-jeopardy-blue">
+        <div className="text-center mb-3">
+          <p className="text-blue-200 text-xs uppercase tracking-wider">{store.lkRoundData.category}</p>
+          <p className="gold-text text-lg font-bold font-mono">CPT {store.lkRoundData.cptCode}</p>
+        </div>
+
+        {/* Show options with reveal state */}
+        <div className="flex-1">
+          <PlayerSelectionGrid
+            roundData={store.lkRoundData}
+            selectedIndices={store.lkSelectedIndices}
+            hasSubmitted={true}
+            revealedOptions={store.lkRevealedOptions}
+            onToggle={() => {}}
+            onSubmit={() => {}}
+          />
+        </div>
+
+        <div className="text-center py-2 bg-white/5 rounded-lg">
+          <p className="text-xs text-blue-200">
+            Score: <span className="gold-text font-bold">${store.score}</span>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── LOCK & KEY: ROUND RESULTS PHASE ───
+  if (store.phase === "lk_round_results") {
+    return (
+      <div className="min-h-screen flex flex-col p-4 bg-gradient-to-b from-jeopardy-navy via-jeopardy-dark to-jeopardy-blue">
+        {/* Personal result */}
+        {store.lkMyResult && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`text-center py-3 rounded-lg mb-4 ${
+              store.lkMyResult.totalDelta >= 0
+                ? "bg-green-500/20 border border-green-500/40"
+                : "bg-red-500/20 border border-red-500/40"
+            }`}
+          >
+            <p className={`text-lg font-bold ${store.lkMyResult.totalDelta >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {store.lkMyResult.totalDelta >= 0 ? "+" : ""}{store.lkMyResult.totalDelta} points
+            </p>
+            <p className="text-blue-200/70 text-xs mt-1">
+              {store.lkMyResult.correctSelections} correct, {store.lkMyResult.incorrectSelections} incorrect
+              {store.lkMyResult.perfectBonus > 0 && " | Perfect!"}
+              {" | "}{store.lkMyResult.speedMultiplier}x speed
+            </p>
+          </motion.div>
+        )}
+
+        {/* Reveal note */}
+        {store.lkRevealNote && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-white/5 rounded-xl p-4 mb-4 border border-white/10"
+          >
+            <p className="text-sm font-semibold text-blue-400 mb-1">Billing Note</p>
+            <p className="text-white/90 text-sm">{store.lkRevealNote}</p>
+          </motion.div>
+        )}
+
+        {/* Score + leaderboard */}
+        <div className="text-center mb-4">
+          <p className="text-sm text-blue-200">Your Score</p>
+          <p className="text-3xl font-bold gold-text">${store.score.toLocaleString()}</p>
+        </div>
+
+        <div className="w-full max-w-sm mx-auto">
+          <MiniLeaderboard scores={store.scores} myName={name} />
+        </div>
+      </div>
+    );
+  }
+
   // ─── QUESTION / BUZZ PHASE ───
   if (
     store.phase === "question" ||
@@ -354,7 +688,9 @@ export default function PlayerGamePage() {
       <div className="text-center mb-6">
         <h2 className="text-2xl font-display gold-text mb-1">{store.gameTitle || "JEOPARDY!"}</h2>
         <p className="text-blue-200/60 text-sm">
-          Host is selecting a question...
+          {store.gameMode === "lock-and-key"
+            ? "Host is selecting a round..."
+            : "Host is selecting a question..."}
         </p>
       </div>
 

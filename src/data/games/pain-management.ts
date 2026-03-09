@@ -1,6 +1,7 @@
-import { GameConfig } from "../types";
+import { JeopardyGameConfig } from "../types";
 
-const painManagement: GameConfig = {
+const painManagement: JeopardyGameConfig = {
+  gameMode: "jeopardy",
   id: "pain-management",
   title: "CPT & ICD-10 JEOPARDY!",
   subtitle: "Pain Management Edition",

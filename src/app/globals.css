@@ -90,3 +90,111 @@ body {
   0% { transform: scale(1.5); }
   100% { transform: scale(1); }
 }
+
+/* Lock & Key board cell */
+.lk-board-cell {
+  @apply relative flex flex-col items-center justify-center cursor-pointer select-none;
+  @apply border-2 border-black/30 transition-all duration-200 p-2;
+  background: linear-gradient(180deg, #1a10d1 0%, #060CE9 50%, #0008b8 100%);
+}
+
+.lk-board-cell:hover:not(.revealed) {
+  @apply brightness-125 scale-[1.02];
+  z-index: 10;
+}
+
+.lk-board-cell.revealed {
+  @apply cursor-default opacity-30;
+  background: #1a1a2e;
+}
+
+/* Lock & Key option tile */
+.option-tile {
+  @apply relative flex flex-col p-3 rounded-lg border-2 transition-all duration-200 cursor-pointer;
+  @apply bg-white/5 border-white/20;
+}
+
+.option-tile:hover:not(.submitted) {
+  @apply bg-white/10 border-white/30;
+}
+
+.option-tile.selected {
+  @apply bg-jeopardy-gold/15 border-jeopardy-gold/50;
+  box-shadow: 0 0 12px rgba(255, 204, 0, 0.15);
+}
+
+.option-tile.correct {
+  @apply bg-green-500/15 border-green-400/60;
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.2);
+}
+
+.option-tile.incorrect {
+  @apply bg-red-500/15 border-red-400/60;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
+}
+
+.option-tile.submitted {
+  @apply cursor-default opacity-80;
+}
+
+/* Timer bar */
+.timer-bar {
+  @apply h-2 rounded-full transition-all duration-1000 ease-linear;
+}
+
+.timer-bar.timer-green {
+  @apply bg-green-500;
+}
+
+.timer-bar.timer-yellow {
+  @apply bg-yellow-500;
+}
+
+.timer-bar.timer-red {
+  @apply bg-red-500;
+  animation: timerPulse 0.5s ease-in-out infinite;
+}
+
+@keyframes timerPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Code Serpent Joystick */
+.cs-joystick-container {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  width: 200px;
+  height: 200px;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.cs-joystick-container > button {
+  pointer-events: auto;
+}
+
+.cs-joystick-up {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.cs-joystick-down {
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.cs-joystick-left {
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+}
+
+.cs-joystick-right {
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+}

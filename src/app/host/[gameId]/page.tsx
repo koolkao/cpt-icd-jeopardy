@@ -1,16 +1,25 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { socket } from "@/lib/socket";
 import { useHostStore } from "@/stores/hostStore";
 import { useSocket } from "@/hooks/useSocket";
 import { useSound } from "@/hooks/useSound";
-import type { Player } from "@/data/types";
+import type { Player, ArenaFullSync, ArenaTickDelta, ArenaRoundResult } from "@/data/types";
 import JeopardyBoard from "@/components/board/JeopardyBoard";
 import QuestionReveal from "@/components/board/QuestionReveal";
 import Leaderboard from "@/components/leaderboard/Leaderboard";
 import ConfettiEffect from "@/components/effects/ConfettiEffect";
+import LockAndKeyBoard from "@/components/lockandkey/LockAndKeyBoard";
+import ScenarioCard from "@/components/lockandkey/ScenarioCard";
+import TimerBar from "@/components/lockandkey/TimerBar";
+import RevealGrid from "@/components/lockandkey/RevealGrid";
+import RoundResultsCard from "@/components/lockandkey/RoundResultsCard";
+import ArenaCanvas, { type ArenaStateRef } from "@/components/codeserpent/ArenaCanvas";
+import CountdownOverlay from "@/components/codeserpent/CountdownOverlay";
+import RoundResults from "@/components/codeserpent/RoundResults";
+import { LK_TIMER_DURATION_S } from "@/data/types";
 import { QRCodeSVG } from "qrcode.react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -21,6 +30,19 @@ export default function HostGamePage() {
   const sound = useSound();
   const [judgeFeedback, setJudgeFeedback] = useState<"correct" | "incorrect" | null>(null);
   const [showConfettiBurst, setShowConfettiBurst] = useState(false);
+
+  // Code Serpent: arena state lives in ref (not Zustand) to avoid 10Hz re-renders
+  const arenaStateRef = useRef<ArenaStateRef>({
+    snakes: [],
+    pills: [],
+    timeRemainingS: 0,
+    round: 0,
+    totalRounds: 0,
+    scenarioText: "",
+    events: [],
+    lastTickTime: Date.now(),
+    prevSnakeHeads: new Map(),
+  });
 
   useEffect(() => {
     store.setGameId(gameId);
@@ -41,8 +63,9 @@ export default function HostGamePage() {
     "game:phase-change": (data) => {
       store.setPhase(data.phase);
       if (data.board) store.setBoard(data.board);
+      if (data.lkBoard) store.setLkBoard(data.lkBoard);
       if (data.scores) store.setScores(data.scores);
-      if (data.gameMeta) store.setGameMeta(data.gameMeta.title, data.gameMeta.subtitle);
+      if (data.gameMeta) store.setGameMeta(data.gameMeta.title, data.gameMeta.subtitle, data.gameMeta.gameMode);
       if (data.clue) {
         store.setQuestion(data.clue, data.category, data.pointValue, data.cell);
       }
@@ -55,6 +78,13 @@ export default function HostGamePage() {
       }
       if (data.phase === "game_over") {
         sound.playVictory();
+      }
+      // Code Serpent: store round info from phase changes
+      if (data.round && data.totalRounds) {
+        store.setCsRound(data.round, data.totalRounds, data.scenarioText || "", data.category || "");
+        arenaStateRef.current.round = data.round;
+        arenaStateRef.current.totalRounds = data.totalRounds;
+        arenaStateRef.current.scenarioText = data.scenarioText || "";
       }
     },
     "game:buzz-in": ({ playerId, playerName }) => {
@@ -84,7 +114,74 @@ export default function HostGamePage() {
       store.setNoMoreBuzzers(true);
     },
     "room:cell-revealed": ({ cat, val }) => {
-      store.revealCell(cat, val);
+      if (store.gameMode === "lock-and-key") {
+        store.revealLkCell(cat, val);
+      } else {
+        store.revealCell(cat, val);
+      }
+    },
+    "lk:host-round-data": (round) => {
+      store.setLkCurrentRound(round);
+    },
+    "lk:timer-tick": ({ remaining }) => {
+      store.setLkTimer(remaining);
+    },
+    "lk:submission-count": (count) => {
+      store.setLkSubmissionCount(count);
+    },
+    "lk:reveal-step": ({ step }) => {
+      store.addLkRevealStep(step);
+    },
+    "lk:round-complete": ({ results, revealNote, scores }) => {
+      store.setLkRoundResults(results, revealNote);
+      store.setScores(scores);
+    },
+    // Code Serpent events
+    "cs:tick": (delta: ArenaTickDelta) => {
+      const ref = arenaStateRef.current;
+      // Store previous heads for interpolation
+      ref.prevSnakeHeads.clear();
+      for (const s of ref.snakes) {
+        if (s.segments.length > 0) {
+          ref.prevSnakeHeads.set(s.playerId, { x: s.segments[0].x, y: s.segments[0].y });
+        }
+      }
+      // Update from delta — rebuild snake segments from delta info
+      for (const ds of delta.snakes) {
+        const existing = ref.snakes.find((s) => s.playerId === ds.playerId);
+        if (existing) {
+          if (ds.alive && existing.segments.length > 0) {
+            existing.segments.unshift({ x: ds.headX, y: ds.headY });
+            while (existing.segments.length > ds.length) existing.segments.pop();
+          }
+          existing.direction = ds.direction;
+          existing.alive = ds.alive;
+          existing.score = ds.score;
+        }
+      }
+      ref.pills = delta.pills;
+      ref.events.push(...delta.events);
+      ref.timeRemainingS = delta.timeRemainingS;
+      ref.lastTickTime = Date.now();
+    },
+    "cs:sync": (sync: ArenaFullSync) => {
+      const ref = arenaStateRef.current;
+      ref.snakes = sync.snakes;
+      ref.pills = sync.pills;
+      ref.timeRemainingS = sync.timeRemainingS;
+      ref.round = sync.round;
+      ref.lastTickTime = Date.now();
+    },
+    "cs:countdown": ({ secondsLeft }: { secondsLeft: number }) => {
+      store.setCsCountdown(secondsLeft);
+    },
+    "cs:round-end": ({ results, teachingNote, correctCodes, scores }: {
+      results: ArenaRoundResult[];
+      teachingNote: string;
+      correctCodes: { code: string; description: string }[];
+      scores: { playerId: string; playerName: string; score: number }[];
+    }) => {
+      store.setCsRoundResults(results, teachingNote, correctCodes, scores);
     },
   });
 
@@ -116,7 +213,12 @@ export default function HostGamePage() {
     socket.emit("host:return-to-board", { gameId });
     store.setBuzzedPlayer(null);
     store.setNoMoreBuzzers(false);
+    store.clearLkRoundState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameId]);
+
+  const handleStartReveal = useCallback(() => {
+    socket.emit("host:lk-start-reveal", { gameId });
   }, [gameId]);
 
   const handleSkip = useCallback(() => {
@@ -126,6 +228,75 @@ export default function HostGamePage() {
   const handleEndGame = useCallback(() => {
     socket.emit("host:end-game", { gameId });
   }, [gameId]);
+
+  const handleCsNextRound = useCallback(() => {
+    socket.emit("host:cs-next-round", { gameId });
+    store.clearCsState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameId]);
+
+  // ─── CODE SERPENT: COUNTDOWN ───
+  if (store.phase === "cs_countdown") {
+    return (
+      <CountdownOverlay
+        secondsLeft={store.csCountdown}
+        scenarioText={store.csScenarioText}
+        category={store.csCategory}
+        round={store.csRound}
+        totalRounds={store.csTotalRounds}
+      />
+    );
+  }
+
+  // ─── CODE SERPENT: PLAYING ───
+  if (store.phase === "cs_playing") {
+    return (
+      <div className="min-h-screen flex flex-col bg-black relative">
+        {/* Scenario bar at top */}
+        <div className="bg-black/80 px-4 py-2 text-center z-10">
+          <p className="text-blue-200 text-xs">
+            Round {store.csRound}/{store.csTotalRounds} — {store.csCategory}
+          </p>
+          <p className="text-white text-sm truncate max-w-3xl mx-auto">{store.csScenarioText}</p>
+        </div>
+
+        {/* Arena canvas fills remaining space */}
+        <div className="flex-1 flex items-center justify-center p-2">
+          <div className="w-full h-full max-w-[1200px] max-h-[800px] aspect-[3/2]">
+            <ArenaCanvas stateRef={arenaStateRef} showHUD />
+          </div>
+        </div>
+
+        {/* Bottom controls */}
+        <div className="bg-black/80 px-4 py-2 flex justify-between items-center z-10">
+          <span className="text-blue-200/60 text-xs">Code: {gameId}</span>
+          <button
+            onClick={handleEndGame}
+            className="text-xs px-3 py-1 rounded bg-white/10 text-white/60 hover:text-white hover:bg-white/20 transition-colors"
+          >
+            End Game
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── CODE SERPENT: ROUND RESULTS ───
+  if (store.phase === "cs_round_results") {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-jeopardy-navy via-jeopardy-dark to-jeopardy-blue">
+        <RoundResults
+          results={store.csRoundResults}
+          teachingNote={store.csTeachingNote}
+          correctCodes={store.csCorrectCodes}
+          scores={store.csScores}
+          round={store.csRound}
+          totalRounds={store.csTotalRounds}
+          onNextRound={handleCsNextRound}
+        />
+      </div>
+    );
+  }
 
   // ─── LOBBY PHASE ───
   if (store.phase === "lobby") {
@@ -440,6 +611,89 @@ export default function HostGamePage() {
     );
   }
 
+  // ─── LOCK & KEY: PLAYING PHASE ───
+  if (store.phase === "lk_playing" && store.lkCurrentRound) {
+    return (
+      <div className="min-h-screen flex flex-col p-6 bg-gradient-to-b from-jeopardy-navy via-jeopardy-dark to-jeopardy-blue">
+        {/* Timer */}
+        <TimerBar remaining={store.lkTimerRemaining} total={LK_TIMER_DURATION_S} />
+
+        {/* Scenario */}
+        <div className="flex-1 flex flex-col items-center justify-center">
+          <ScenarioCard
+            cptCode={store.lkCurrentRound.cptCode}
+            cptDescription={store.lkCurrentRound.cptDescription}
+            scenario={store.lkCurrentRound.scenario}
+            category={store.lkCurrentRound.category}
+            subcategory={store.lkCurrentRound.subcategory}
+          />
+        </div>
+
+        {/* Submission status + controls */}
+        <div className="text-center mt-4 space-y-3">
+          <p className="text-blue-200">
+            Submissions: <span className="gold-text font-bold">{store.lkSubmissionCount.submitted}</span> / {store.lkSubmissionCount.total}
+          </p>
+          <button
+            onClick={handleStartReveal}
+            className="px-8 py-3 rounded-lg bg-jeopardy-gold text-jeopardy-navy font-bold text-lg hover:bg-jeopardy-gold-light transition-colors"
+          >
+            Start Reveal
+          </button>
+        </div>
+
+        {/* Answer key for host */}
+        <div className="mt-4 bg-white/5 rounded-lg p-3">
+          <p className="text-xs text-blue-200/50 mb-2">Answer Key (host only):</p>
+          <div className="flex flex-wrap gap-2">
+            {store.lkCurrentRound.options.map((opt, i) => (
+              <span key={i} className={`text-xs px-2 py-1 rounded ${opt.isCorrect ? 'bg-green-500/20 text-green-300' : 'bg-red-500/10 text-red-300/50'}`}>
+                {opt.code}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── LOCK & KEY: REVEALING PHASE ───
+  if (store.phase === "lk_revealing" && store.lkCurrentRound) {
+    const clientOptions = store.lkCurrentRound.options.map((o, i) => ({
+      code: o.code, description: o.description, index: i
+    }));
+    return (
+      <div className="min-h-screen flex flex-col p-6 bg-gradient-to-b from-jeopardy-navy via-jeopardy-dark to-jeopardy-blue">
+        <div className="text-center mb-4">
+          <p className="text-blue-200 text-sm uppercase tracking-wider">{store.lkCurrentRound.category}</p>
+          <p className="gold-text text-2xl font-bold font-mono">CPT {store.lkCurrentRound.cptCode}</p>
+          <p className="text-white text-sm mt-1">{store.lkCurrentRound.cptDescription}</p>
+        </div>
+        <div className="flex-1">
+          <RevealGrid
+            options={clientOptions}
+            revealedSteps={store.lkRevealedOptions}
+            totalPlayers={store.lkSubmissionCount.total}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // ─── LOCK & KEY: ROUND RESULTS PHASE ───
+  if (store.phase === "lk_round_results") {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-jeopardy-navy via-jeopardy-dark to-jeopardy-blue">
+        <RoundResultsCard
+          revealNote={store.lkRevealNote}
+          results={store.lkRoundResults}
+          scores={store.scores}
+          onReturnToBoard={handleReturnToBoard}
+        />
+      </div>
+    );
+  }
+
   // ─── BOARD PHASE ───
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-jeopardy-navy to-jeopardy-dark">
@@ -463,11 +717,19 @@ export default function HostGamePage() {
 
       {/* Board */}
       <div className="flex-1 p-2 md:p-4">
-        <JeopardyBoard
-          board={store.board}
-          categories={store.categories}
-          onSelectCell={handleSelectCell}
-        />
+        {store.gameMode === "lock-and-key" ? (
+          <LockAndKeyBoard
+            board={store.lkBoard}
+            categories={store.categories}
+            onSelectCell={handleSelectCell}
+          />
+        ) : (
+          <JeopardyBoard
+            board={store.board}
+            categories={store.categories}
+            onSelectCell={handleSelectCell}
+          />
+        )}
       </div>
 
       {/* Scores bar */}

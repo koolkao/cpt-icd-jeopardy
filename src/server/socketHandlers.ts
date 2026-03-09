@@ -1,6 +1,6 @@
 import { Server, Socket } from "socket.io";
 import { GameManager } from "./GameManager";
-import { POINT_VALUES, TIMER_DURATION_MS, ANSWER_TIMER_MS } from "../data/types";
+import { POINT_VALUES, TIMER_DURATION_MS, ANSWER_TIMER_MS, Direction } from "../data/types";
 import { getGameConfig } from "../data/games";
 
 export function registerSocketHandlers(
@@ -46,9 +46,19 @@ export function registerSocketHandlers(
       socket.emit("game:state-sync", room.getSnapshot());
 
       // If a question is active, also send the answer
-      const answerData = room.getCurrentAnswerData();
-      if (answerData && room.phase !== "lobby" && room.phase !== "board" && room.phase !== "game_over") {
-        socket.emit("game:host-clue-data", answerData);
+      if (room.gameMode === "jeopardy") {
+        const answerData = room.getCurrentAnswerData();
+        if (answerData && room.phase !== "lobby" && room.phase !== "board" && room.phase !== "game_over") {
+          socket.emit("game:host-clue-data", answerData);
+        }
+      } else if (room.gameMode === "lock-and-key") {
+        if (room.lkCurrentRound && (room.phase === "lk_playing" || room.phase === "lk_revealing" || room.phase === "lk_round_results")) {
+          socket.emit("lk:host-round-data", room.lkCurrentRound);
+        }
+      } else if (room.gameMode === "code-serpent" && room.csEngine) {
+        if (room.phase === "cs_playing") {
+          socket.emit("cs:sync", room.csEngine.getFullSync());
+        }
       }
       console.log(`[Game ${gameId}] Control view connected: ${socket.id}`);
     }
@@ -59,16 +69,30 @@ export function registerSocketHandlers(
     if (!room || !room.isHost(socket.id)) return;
     if (room.phase !== "lobby") return;
 
-    room.generateBoard();
-    room.phase = "board";
-
-    io.to(gameId).emit("game:phase-change", {
-      phase: "board",
-      board: room.getBoardData(),
-      scores: room.getScores(),
-      gameMeta: room.getGameMeta(),
-    });
-    console.log(`[Game ${gameId}] Started with ${room.players.size} players`);
+    if (room.gameMode === "code-serpent") {
+      room.initCodeSerpent(io);
+      room.csStartNextRound();
+      console.log(`[Game ${gameId}] Code Serpent started with ${room.players.size} players`);
+    } else if (room.gameMode === "lock-and-key") {
+      room.generateLockAndKeyBoard();
+      room.phase = "board";
+      io.to(gameId).emit("game:phase-change", {
+        phase: "board",
+        lkBoard: room.getLockAndKeyBoardData(),
+        scores: room.getScores(),
+        gameMeta: room.getGameMeta(),
+      });
+    } else {
+      room.generateBoard();
+      room.phase = "board";
+      io.to(gameId).emit("game:phase-change", {
+        phase: "board",
+        board: room.getBoardData(),
+        scores: room.getScores(),
+        gameMeta: room.getGameMeta(),
+      });
+    }
+    console.log(`[Game ${gameId}] Started with ${room.players.size} players (${room.gameMode})`);
   });
 
   socket.on(
@@ -78,6 +102,35 @@ export function registerSocketHandlers(
       if (!room || !room.isHost(socket.id)) return;
       if (room.phase !== "board") return;
 
+      // ── Lock & Key mode ──
+      if (room.gameMode === "lock-and-key") {
+        const round = room.selectLockAndKeyCell(cat, val);
+        if (!round) return;
+
+        room.phase = "lk_playing";
+
+        // Send round data WITHOUT answers to all players
+        io.to(gameId).emit("game:phase-change", {
+          phase: "lk_playing",
+          lkRound: room.getLockAndKeyRoundClientData(),
+          timer: room.lkTimerRemaining,
+          cell: { cat, val },
+        });
+        io.to(gameId).emit("room:cell-revealed", { cat, val });
+
+        // Send full round data WITH answers to host + control
+        const hostSockets = [room.hostSocketId, ...room.controlSocketIds];
+        for (const sid of hostSockets) {
+          io.to(sid).emit("lk:host-round-data", room.lkCurrentRound);
+        }
+
+        // Start server timer
+        room.startTimer(io, gameId);
+        console.log(`[Game ${gameId}] Lock & Key round: CPT ${round.cptCode}`);
+        return;
+      }
+
+      // ── Jeopardy mode ──
       const cell = room.board[cat]?.[val];
       if (!cell || cell.isRevealed) return;
 
@@ -176,7 +229,6 @@ export function registerSocketHandlers(
         room.failedBuzzers.add(result.player.id);
         const next = room.nextBuzzer();
         if (next) {
-          // Someone else already in the queue — let them answer
           room.phase = "buzz_locked";
           io.to(gameId).emit("game:buzz-in", {
             playerId: next.playerId,
@@ -186,12 +238,10 @@ export function registerSocketHandlers(
             timeLimit: ANSWER_TIMER_MS,
           });
         } else if (room.allPlayersFailed()) {
-          // Everyone has tried and failed
           room.activeBuzzer = null;
           room.phase = "question";
           io.to(gameId).emit("game:no-more-buzzers", {});
         } else {
-          // Re-open buzzers for remaining players
           room.activeBuzzer = null;
           room.phase = "buzz_open";
           io.to(gameId).emit("game:buzz-open", {
@@ -226,6 +276,33 @@ export function registerSocketHandlers(
     const room = gameManager.getRoom(gameId);
     if (!room || !room.isHost(socket.id)) return;
 
+    if (room.gameMode === "code-serpent") {
+      room.csStartNextRound();
+      return;
+    }
+
+    if (room.gameMode === "lock-and-key") {
+      room.cleanupLkRound();
+
+      if (room.isAllLkRevealed()) {
+        room.phase = "game_over";
+        io.to(gameId).emit("game:phase-change", {
+          phase: "game_over",
+          scores: room.getScores(),
+        });
+        console.log(`[Game ${gameId}] Game over!`);
+      } else {
+        room.phase = "board";
+        io.to(gameId).emit("game:phase-change", {
+          phase: "board",
+          lkBoard: room.getLockAndKeyBoardData(),
+          scores: room.getScores(),
+        });
+      }
+      return;
+    }
+
+    // Jeopardy mode
     room.currentQuestion = null;
     room.currentCell = null;
     room.buzzQueue = [];
@@ -269,12 +346,35 @@ export function registerSocketHandlers(
     const room = gameManager.getRoom(gameId);
     if (!room || !room.isHost(socket.id)) return;
 
+    // Clean up any running timers
+    room.clearTimer();
+    if (room.lkRevealInterval) {
+      clearInterval(room.lkRevealInterval);
+      room.lkRevealInterval = null;
+    }
+    room.cleanupCodeSerpent();
+
     room.phase = "game_over";
     io.to(gameId).emit("game:phase-change", {
       phase: "game_over",
       scores: room.getScores(),
     });
     console.log(`[Game ${gameId}] Host ended game`);
+  });
+
+  // ─── LOCK & KEY HOST EVENTS ───
+
+  socket.on("host:lk-start-reveal", ({ gameId }: { gameId: string }) => {
+    const room = gameManager.getRoom(gameId);
+    if (!room || !room.isHost(socket.id)) return;
+    if (room.phase !== "lk_playing") return;
+
+    room.clearTimer();
+    room.autoSubmitRemaining();
+    room.phase = "lk_revealing";
+    io.to(gameId).emit("game:phase-change", { phase: "lk_revealing" });
+    room.startRevealSequence(io, gameId);
+    console.log(`[Game ${gameId}] Host started reveal`);
   });
 
   // ─── PLAYER EVENTS ───
@@ -300,7 +400,6 @@ export function registerSocketHandlers(
             playerId: socket.id,
             playerName: name,
           });
-          // Send full state sync to reconnected player
           socket.emit("game:state-sync", room.getSnapshot());
           console.log(`[Game ${gameId}] ${name} reconnected`);
           return;
@@ -311,9 +410,10 @@ export function registerSocketHandlers(
 
       const player = room.addPlayer(socket.id, name);
       if (!player) {
+        const maxPlayers = room.gameMode === "lock-and-key" ? 30 : 20;
         callback({
           success: false,
-          error: "Name already taken or game is full (max 20 players).",
+          error: `Name already taken or game is full (max ${maxPlayers} players).`,
         });
         return;
       }
@@ -338,19 +438,17 @@ export function registerSocketHandlers(
       if (room.phase !== "buzz_open" && room.phase !== "question") return;
 
       const position = room.buzz(socket.id);
-      if (position < 0) return; // already buzzed
+      if (position < 0) return;
 
       const player = room.players.get(socket.id);
       if (!player) return;
 
-      // Notify the buzzer of their position
       socket.emit("game:buzz-result", {
         position,
         isFirst: position === 0,
       });
 
       if (position === 0) {
-        // First buzz — lock in
         room.lockBuzzer(socket.id);
         io.to(gameId).emit("game:buzz-in", {
           playerId: socket.id,
@@ -373,7 +471,6 @@ export function registerSocketHandlers(
       const player = room.players.get(socket.id);
       if (!player) return;
 
-      // Clamp wager: min 5, max is the greater of player's score or highest value on board
       const maxWager = Math.max(player.score, 1000);
       room.dailyDoubleWager = Math.max(5, Math.min(wager, maxWager));
       room.dailyDoublePlayer = socket.id;
@@ -394,16 +491,66 @@ export function registerSocketHandlers(
     }
   );
 
+  // ─── LOCK & KEY PLAYER EVENTS ───
+
+  socket.on(
+    "player:lk-submit-selections",
+    ({ gameId, selectedIndices }: { gameId: string; selectedIndices: number[] }) => {
+      const room = gameManager.getRoom(gameId);
+      if (!room) return;
+      if (room.phase !== "lk_playing") return;
+      if (!room.players.has(socket.id)) return;
+
+      const count = room.submitSelection(socket.id, selectedIndices);
+      io.to(gameId).emit("lk:submission-count", count);
+
+      console.log(`[Game ${gameId}] ${room.players.get(socket.id)?.name} submitted (${count.submitted}/${count.total})`);
+
+      // If all submitted, start reveal immediately
+      if (room.allSubmitted()) {
+        room.clearTimer();
+        room.phase = "lk_revealing";
+        io.to(gameId).emit("game:phase-change", { phase: "lk_revealing" });
+        room.startRevealSequence(io, gameId);
+        console.log(`[Game ${gameId}] All submitted, starting reveal`);
+      }
+    }
+  );
+
+  // ─── CODE SERPENT EVENTS ───
+
+  socket.on(
+    "player:cs-direction",
+    ({ gameId, direction }: { gameId: string; direction: Direction }) => {
+      const room = gameManager.getRoom(gameId);
+      if (!room) return;
+      if (room.phase !== "cs_playing") return;
+      room.csSetDirection(socket.id, direction);
+    }
+  );
+
+  socket.on("host:cs-next-round", ({ gameId }: { gameId: string }) => {
+    const room = gameManager.getRoom(gameId);
+    if (!room || !room.isHost(socket.id)) return;
+    if (room.phase !== "cs_round_results") return;
+    room.csStartNextRound();
+  });
+
+  socket.on("host:cs-skip-round", ({ gameId }: { gameId: string }) => {
+    const room = gameManager.getRoom(gameId);
+    if (!room || !room.isHost(socket.id)) return;
+    if (room.phase !== "cs_playing") return;
+    room.csSkipRound();
+  });
+
   // ─── DISCONNECT ───
 
   socket.on("disconnect", () => {
-    // Check all rooms for this socket
     for (const [gameId, room] of gameManager.getAllRooms()) {
       if (room.controlSocketIds.has(socket.id)) {
         room.removeControlSocket(socket.id);
         console.log(`[Game ${gameId}] Control view disconnected`);
       } else if (room.hostSocketId === socket.id) {
-        // Host disconnected — notify players
         io.to(gameId).emit("game:host-disconnected", {});
         console.log(`[Game ${gameId}] Host disconnected`);
       } else if (room.players.has(socket.id)) {

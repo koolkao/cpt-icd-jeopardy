@@ -5,7 +5,12 @@ import { useParams } from "next/navigation";
 import { socket } from "@/lib/socket";
 import { useControlStore } from "@/stores/controlStore";
 import { useSocket } from "@/hooks/useSocket";
-import type { Player } from "@/data/types";
+import type { Player, LockAndKeyRound, ArenaRoundResult } from "@/data/types";
+import { LK_TIMER_DURATION_S } from "@/data/types";
+import TimerBar from "@/components/lockandkey/TimerBar";
+import RevealGrid from "@/components/lockandkey/RevealGrid";
+import RoundResultsCard from "@/components/lockandkey/RoundResultsCard";
+import RoundResults from "@/components/codeserpent/RoundResults";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function HostControlPage() {
@@ -51,12 +56,12 @@ export default function HostControlPage() {
       store.setPhase(snapshot.phase);
       if (snapshot.scores) store.setScores(snapshot.scores);
       if (snapshot.players) store.setPlayers(snapshot.players);
-      if (snapshot.gameMeta) store.setGameMeta(snapshot.gameMeta.title, snapshot.gameMeta.subtitle);
+      if (snapshot.gameMeta) store.setGameMeta(snapshot.gameMeta.title, snapshot.gameMeta.subtitle, snapshot.gameMeta.gameMode);
     },
     "game:phase-change": (data) => {
       store.setPhase(data.phase);
       if (data.scores) store.setScores(data.scores);
-      if (data.gameMeta) store.setGameMeta(data.gameMeta.title, data.gameMeta.subtitle);
+      if (data.gameMeta) store.setGameMeta(data.gameMeta.title, data.gameMeta.subtitle, data.gameMeta.gameMode);
       if (data.clue) {
         store.setClue(data.clue, data.category, data.pointValue);
       }
@@ -65,6 +70,10 @@ export default function HostControlPage() {
       }
       if (data.phase === "board" || data.phase === "lobby") {
         store.setAnswerData(null);
+      }
+      // Code Serpent
+      if (data.round && data.totalRounds) {
+        store.setCsRound(data.round, data.totalRounds, data.scenarioText || "", data.category || "");
       }
     },
     "game:host-clue-data": (data) => {
@@ -95,6 +104,35 @@ export default function HostControlPage() {
       store.setBuzzedPlayer(null);
       store.setNoMoreBuzzers(true);
     },
+    // Lock & Key events
+    "lk:host-round-data": (round: LockAndKeyRound) => {
+      store.setLkCurrentRound(round);
+    },
+    "lk:timer-tick": ({ remaining }: { remaining: number }) => {
+      store.setLkTimer(remaining);
+    },
+    "lk:submission-count": (count: { submitted: number; total: number }) => {
+      store.setLkSubmissionCount(count);
+    },
+    "lk:reveal-step": ({ step }) => {
+      store.addLkRevealStep(step);
+    },
+    "lk:round-complete": ({ results, revealNote, scores }) => {
+      store.setLkRoundResults(results, revealNote);
+      store.setScores(scores);
+    },
+    // Code Serpent events
+    "cs:countdown": ({ secondsLeft }: { secondsLeft: number }) => {
+      store.setCsCountdown(secondsLeft);
+    },
+    "cs:round-end": ({ results, teachingNote, correctCodes, scores }: {
+      results: ArenaRoundResult[];
+      teachingNote: string;
+      correctCodes: { code: string; description: string }[];
+      scores: { playerId: string; playerName: string; score: number }[];
+    }) => {
+      store.setCsRoundResults(results, teachingNote, correctCodes, scores);
+    },
   });
 
   const handleStartGame = useCallback(() => {
@@ -117,7 +155,12 @@ export default function HostControlPage() {
     store.setBuzzedPlayer(null);
     store.setNoMoreBuzzers(false);
     store.setAnswerData(null);
+    store.clearLkRoundState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameId]);
+
+  const handleStartReveal = useCallback(() => {
+    socket.emit("host:lk-start-reveal", { gameId });
   }, [gameId]);
 
   const handleSkip = useCallback(() => {
@@ -126,6 +169,12 @@ export default function HostControlPage() {
 
   const handleEndGame = useCallback(() => {
     socket.emit("host:end-game", { gameId });
+  }, [gameId]);
+
+  const handleCsNextRound = useCallback(() => {
+    socket.emit("host:cs-next-round", { gameId });
+    store.clearCsState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameId]);
 
   // ─── PASSWORD GATE ───
@@ -219,6 +268,12 @@ export default function HostControlPage() {
     buzz_locked: "ANSWERING",
     answer_reveal: "ANSWER REVEAL",
     daily_double: "DAILY DOUBLE",
+    lk_playing: "ROUND ACTIVE",
+    lk_revealing: "REVEALING",
+    lk_round_results: "ROUND RESULTS",
+    cs_countdown: "COUNTDOWN",
+    cs_playing: "ARENA ACTIVE",
+    cs_round_results: "ROUND RESULTS",
     game_over: "GAME OVER",
   };
 
@@ -261,7 +316,7 @@ export default function HostControlPage() {
             >
               <div className="bg-white/5 rounded-xl p-4">
                 <h3 className="text-white font-semibold mb-2">
-                  Players ({store.players.length}/20)
+                  Players ({store.players.length}/{store.gameMode === "lock-and-key" ? 30 : 20})
                 </h3>
                 {store.players.length === 0 ? (
                   <p className="text-blue-200/50 text-sm">
@@ -302,7 +357,9 @@ export default function HostControlPage() {
             >
               <div className="bg-white/5 rounded-xl p-6 text-center">
                 <p className="text-blue-200/60 text-lg">
-                  Select a question on the projected board...
+                  {store.gameMode === "lock-and-key"
+                    ? "Select a round on the projected board..."
+                    : "Select a question on the projected board..."}
                 </p>
               </div>
               <ScoreList scores={store.scores} />
@@ -479,6 +536,165 @@ export default function HostControlPage() {
               </button>
 
               <ScoreList scores={store.scores} />
+            </motion.div>
+          )}
+
+          {/* ─── LOCK & KEY: PLAYING ─── */}
+          {store.phase === "lk_playing" && store.lkCurrentRound && (
+            <motion.div
+              key="lk-playing"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="space-y-4"
+            >
+              {/* Timer */}
+              <TimerBar remaining={store.lkTimerRemaining} total={LK_TIMER_DURATION_S} />
+
+              {/* Scenario info */}
+              <div className="bg-white/5 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-blue-200 text-xs uppercase tracking-wider">
+                    {store.lkCurrentRound.category}
+                  </p>
+                  <p className="gold-text text-sm font-bold font-mono">
+                    CPT {store.lkCurrentRound.cptCode}
+                  </p>
+                </div>
+                <p className="text-white text-sm mb-2">{store.lkCurrentRound.cptDescription}</p>
+                <p className="text-blue-200/80 text-xs italic">{store.lkCurrentRound.scenario}</p>
+              </div>
+
+              {/* Answer key */}
+              <div className="bg-emerald-900/40 border-2 border-emerald-400/60 rounded-xl p-4">
+                <p className="text-emerald-300 text-xs uppercase tracking-wider font-semibold mb-2">
+                  Answer Key
+                </p>
+                <div className="space-y-1">
+                  {store.lkCurrentRound.options.map((opt, i) => (
+                    <div key={i} className={`flex items-center gap-2 text-sm ${opt.isCorrect ? 'text-green-300' : 'text-red-300/50'}`}>
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${opt.isCorrect ? 'bg-green-500/20' : 'bg-red-500/10'}`}>
+                        {opt.isCorrect ? 'KEY' : '---'}
+                      </span>
+                      <span className="font-mono">{opt.code}</span>
+                      <span className="text-white/60 text-xs truncate">{opt.description}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Submission status + controls */}
+              <div className="space-y-3">
+                <div className="bg-white/5 rounded-xl p-4 text-center">
+                  <p className="text-blue-200 text-sm mb-1">Submissions</p>
+                  <p className="text-xl font-bold gold-text">
+                    {store.lkSubmissionCount.submitted} / {store.lkSubmissionCount.total}
+                  </p>
+                </div>
+                <button
+                  onClick={handleStartReveal}
+                  className="w-full py-3 rounded-lg bg-jeopardy-gold text-jeopardy-navy font-bold text-lg hover:bg-jeopardy-gold-light transition-colors"
+                >
+                  Start Reveal
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ─── LOCK & KEY: REVEALING ─── */}
+          {store.phase === "lk_revealing" && store.lkCurrentRound && (
+            <motion.div
+              key="lk-revealing"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="space-y-4"
+            >
+              <div className="text-center">
+                <p className="text-blue-200 text-xs uppercase tracking-wider">{store.lkCurrentRound.category}</p>
+                <p className="gold-text text-lg font-bold font-mono">CPT {store.lkCurrentRound.cptCode}</p>
+              </div>
+              <RevealGrid
+                options={store.lkCurrentRound.options.map((o, i) => ({
+                  code: o.code, description: o.description, index: i
+                }))}
+                revealedSteps={store.lkRevealedOptions}
+                totalPlayers={store.lkSubmissionCount.total}
+              />
+            </motion.div>
+          )}
+
+          {/* ─── LOCK & KEY: ROUND RESULTS ─── */}
+          {store.phase === "lk_round_results" && (
+            <motion.div
+              key="lk-results"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="space-y-4"
+            >
+              <RoundResultsCard
+                revealNote={store.lkRevealNote}
+                results={store.lkRoundResults}
+                scores={store.scores}
+                onReturnToBoard={handleReturnToBoard}
+              />
+            </motion.div>
+          )}
+
+          {/* ─── CODE SERPENT: COUNTDOWN ─── */}
+          {store.phase === "cs_countdown" && (
+            <motion.div
+              key="cs-countdown"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="space-y-4"
+            >
+              <div className="bg-white/5 rounded-xl p-6 text-center">
+                <p className="text-blue-200 text-sm">Round {store.csRound}/{store.csTotalRounds}</p>
+                <p className="text-4xl font-bold gold-text my-4">{store.csCountdown > 0 ? store.csCountdown : "GO!"}</p>
+                <p className="text-white text-sm">{store.csScenarioText}</p>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ─── CODE SERPENT: PLAYING ─── */}
+          {store.phase === "cs_playing" && (
+            <motion.div
+              key="cs-playing"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="space-y-4"
+            >
+              <div className="bg-white/5 rounded-xl p-4 text-center">
+                <p className="text-blue-200 text-xs uppercase tracking-wider">Arena Active</p>
+                <p className="text-white text-sm mt-1">{store.csScenarioText}</p>
+                <p className="text-blue-200/60 text-xs mt-2">Round {store.csRound}/{store.csTotalRounds}</p>
+              </div>
+              <ScoreList scores={store.scores} />
+            </motion.div>
+          )}
+
+          {/* ─── CODE SERPENT: ROUND RESULTS ─── */}
+          {store.phase === "cs_round_results" && (
+            <motion.div
+              key="cs-results"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="space-y-4"
+            >
+              <RoundResults
+                results={store.csRoundResults}
+                teachingNote={store.csTeachingNote}
+                correctCodes={store.csCorrectCodes}
+                scores={store.csScores}
+                round={store.csRound}
+                totalRounds={store.csTotalRounds}
+                onNextRound={handleCsNextRound}
+              />
             </motion.div>
           )}
 
