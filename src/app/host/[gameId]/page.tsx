@@ -6,7 +6,7 @@ import { socket } from "@/lib/socket";
 import { useHostStore } from "@/stores/hostStore";
 import { useSocket } from "@/hooks/useSocket";
 import { useSound } from "@/hooks/useSound";
-import type { Player, ArenaFullSync, ArenaTickDelta, ArenaRoundResult } from "@/data/types";
+import type { Player, ArenaFullSync, ArenaTickDelta, ArenaRoundResult, Direction } from "@/data/types";
 import JeopardyBoard from "@/components/board/JeopardyBoard";
 import QuestionReveal from "@/components/board/QuestionReveal";
 import Leaderboard from "@/components/leaderboard/Leaderboard";
@@ -16,7 +16,7 @@ import ScenarioCard from "@/components/lockandkey/ScenarioCard";
 import TimerBar from "@/components/lockandkey/TimerBar";
 import RevealGrid from "@/components/lockandkey/RevealGrid";
 import RoundResultsCard from "@/components/lockandkey/RoundResultsCard";
-import ArenaCanvas, { type ArenaStateRef } from "@/components/codeserpent/ArenaCanvas";
+import ArenaCanvas, { type ArenaStateRef, emptySnapshot } from "@/components/codeserpent/ArenaCanvas";
 import CountdownOverlay from "@/components/codeserpent/CountdownOverlay";
 import RoundResults from "@/components/codeserpent/RoundResults";
 import { LK_TIMER_DURATION_S } from "@/data/types";
@@ -31,17 +31,17 @@ export default function HostGamePage() {
   const [judgeFeedback, setJudgeFeedback] = useState<"correct" | "incorrect" | null>(null);
   const [showConfettiBurst, setShowConfettiBurst] = useState(false);
 
-  // Code Serpent: arena state lives in ref (not Zustand) to avoid 10Hz re-renders
+  // Code Serpent: arena state lives in ref (double-buffered for smooth interpolation)
   const arenaStateRef = useRef<ArenaStateRef>({
-    snakes: [],
-    pills: [],
-    timeRemainingS: 0,
+    from: emptySnapshot(),
+    to: emptySnapshot(),
+    interpStart: performance.now(),
+    tickDuration: 200,
     round: 0,
     totalRounds: 0,
     scenarioText: "",
     events: [],
-    lastTickTime: Date.now(),
-    prevSnakeHeads: new Map(),
+    debug: { tickIntervals: [], tAtArrival: [], tickDuration: 200, frameMs: 0 },
   });
 
   useEffect(() => {
@@ -139,16 +139,20 @@ export default function HostGamePage() {
     // Code Serpent events
     "cs:tick": (delta: ArenaTickDelta) => {
       const ref = arenaStateRef.current;
-      // Store previous heads for interpolation
-      ref.prevSnakeHeads.clear();
-      for (const s of ref.snakes) {
-        if (s.segments.length > 0) {
-          ref.prevSnakeHeads.set(s.playerId, { x: s.segments[0].x, y: s.segments[0].y });
-        }
-      }
-      // Update from delta — rebuild snake segments from delta info
+      const now = performance.now();
+      const elapsed = now - ref.interpStart;
+      // Shift current to → from (clone segments so from is not mutated)
+      ref.from = {
+        heads: ref.to.heads,
+        snakes: ref.to.snakes.map((s) => ({ ...s, segments: [...s.segments] })),
+        pills: ref.to.pills,
+        timeRemainingS: ref.to.timeRemainingS,
+      };
+      // Build new to snapshot
+      const newSnakes = ref.from.snakes.map((s) => ({ ...s, segments: [...s.segments] }));
+      const newHeads = new Map<string, { x: number; y: number; direction: Direction }>();
       for (const ds of delta.snakes) {
-        const existing = ref.snakes.find((s) => s.playerId === ds.playerId);
+        const existing = newSnakes.find((s) => s.playerId === ds.playerId);
         if (existing) {
           if (ds.alive && existing.segments.length > 0) {
             existing.segments.unshift({ x: ds.headX, y: ds.headY });
@@ -158,19 +162,30 @@ export default function HostGamePage() {
           existing.alive = ds.alive;
           existing.score = ds.score;
         }
+        newHeads.set(ds.playerId, { x: ds.headX, y: ds.headY, direction: ds.direction });
       }
-      ref.pills = delta.pills;
+      ref.to = { heads: newHeads, snakes: newSnakes, pills: delta.pills, timeRemainingS: delta.timeRemainingS };
+      // Adaptive tick duration (EMA, clamped to reasonable bounds)
+      if (elapsed > 50 && elapsed < 500) {
+        ref.tickDuration = ref.tickDuration * 0.8 + elapsed * 0.2;
+      }
+      ref.interpStart = now;
       ref.events.push(...delta.events);
-      ref.timeRemainingS = delta.timeRemainingS;
-      ref.lastTickTime = Date.now();
     },
     "cs:sync": (sync: ArenaFullSync) => {
       const ref = arenaStateRef.current;
-      ref.snakes = sync.snakes;
-      ref.pills = sync.pills;
-      ref.timeRemainingS = sync.timeRemainingS;
+      const heads = new Map<string, { x: number; y: number; direction: Direction }>();
+      for (const s of sync.snakes) {
+        if (s.segments.length > 0) {
+          heads.set(s.playerId, { x: s.segments[0].x, y: s.segments[0].y, direction: s.direction });
+        }
+      }
+      const snapshot = { heads, snakes: sync.snakes, pills: sync.pills, timeRemainingS: sync.timeRemainingS };
+      ref.from = snapshot;
+      ref.to = snapshot;
+      ref.interpStart = performance.now();
+      ref.tickDuration = 200;
       ref.round = sync.round;
-      ref.lastTickTime = Date.now();
     },
     "cs:countdown": ({ secondsLeft }: { secondsLeft: number }) => {
       store.setCsCountdown(secondsLeft);

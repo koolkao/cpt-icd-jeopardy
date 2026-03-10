@@ -12,7 +12,7 @@ import ConfettiEffect from "@/components/effects/ConfettiEffect";
 import ScenarioCard from "@/components/lockandkey/ScenarioCard";
 import TimerBar from "@/components/lockandkey/TimerBar";
 import PlayerSelectionGrid from "@/components/lockandkey/PlayerSelectionGrid";
-import ArenaCanvas, { type ArenaStateRef } from "@/components/codeserpent/ArenaCanvas";
+import ArenaCanvas, { type ArenaStateRef, emptySnapshot } from "@/components/codeserpent/ArenaCanvas";
 import CountdownOverlay from "@/components/codeserpent/CountdownOverlay";
 import RoundResults from "@/components/codeserpent/RoundResults";
 import JoystickOverlay from "@/components/codeserpent/JoystickOverlay";
@@ -37,17 +37,17 @@ export default function PlayerGamePage() {
   const store = usePlayerStore();
   const sound = useSound();
 
-  // Code Serpent: arena state in ref
+  // Code Serpent: arena state in ref (double-buffered for smooth interpolation)
   const arenaStateRef = useRef<ArenaStateRef>({
-    snakes: [],
-    pills: [],
-    timeRemainingS: 0,
+    from: emptySnapshot(),
+    to: emptySnapshot(),
+    interpStart: performance.now(),
+    tickDuration: 200,
     round: 0,
     totalRounds: 0,
     scenarioText: "",
     events: [],
-    lastTickTime: Date.now(),
-    prevSnakeHeads: new Map(),
+    debug: { tickIntervals: [], tAtArrival: [], tickDuration: 200, frameMs: 0 },
   });
 
   const handleDirection = useCallback((direction: Direction) => {
@@ -142,14 +142,20 @@ export default function PlayerGamePage() {
     // Code Serpent events
     "cs:tick": (delta: ArenaTickDelta) => {
       const ref = arenaStateRef.current;
-      ref.prevSnakeHeads.clear();
-      for (const s of ref.snakes) {
-        if (s.segments.length > 0) {
-          ref.prevSnakeHeads.set(s.playerId, { x: s.segments[0].x, y: s.segments[0].y });
-        }
-      }
+      const now = performance.now();
+      const elapsed = now - ref.interpStart;
+      // Shift current to → from (clone segments so from is not mutated)
+      ref.from = {
+        heads: ref.to.heads,
+        snakes: ref.to.snakes.map((s) => ({ ...s, segments: [...s.segments] })),
+        pills: ref.to.pills,
+        timeRemainingS: ref.to.timeRemainingS,
+      };
+      // Build new to snapshot
+      const newSnakes = ref.from.snakes.map((s) => ({ ...s, segments: [...s.segments] }));
+      const newHeads = new Map<string, { x: number; y: number; direction: Direction }>();
       for (const ds of delta.snakes) {
-        const existing = ref.snakes.find((s) => s.playerId === ds.playerId);
+        const existing = newSnakes.find((s) => s.playerId === ds.playerId);
         if (existing) {
           if (ds.alive && existing.segments.length > 0) {
             existing.segments.unshift({ x: ds.headX, y: ds.headY });
@@ -159,19 +165,37 @@ export default function PlayerGamePage() {
           existing.alive = ds.alive;
           existing.score = ds.score;
         }
+        newHeads.set(ds.playerId, { x: ds.headX, y: ds.headY, direction: ds.direction });
       }
-      ref.pills = delta.pills;
+      ref.to = { heads: newHeads, snakes: newSnakes, pills: delta.pills, timeRemainingS: delta.timeRemainingS };
+      // Adaptive tick duration (EMA, clamped to reasonable bounds)
+      if (elapsed > 50 && elapsed < 500) {
+        ref.tickDuration = ref.tickDuration * 0.8 + elapsed * 0.2;
+      }
+      // Debug stats (keep last 30 samples)
+      const tAtArrival = Math.min(elapsed / ref.tickDuration, 2);
+      ref.debug.tickIntervals.push(elapsed);
+      ref.debug.tAtArrival.push(tAtArrival);
+      if (ref.debug.tickIntervals.length > 30) ref.debug.tickIntervals.shift();
+      if (ref.debug.tAtArrival.length > 30) ref.debug.tAtArrival.shift();
+      ref.debug.tickDuration = ref.tickDuration;
+      ref.interpStart = now;
       ref.events.push(...delta.events);
-      ref.timeRemainingS = delta.timeRemainingS;
-      ref.lastTickTime = Date.now();
     },
     "cs:sync": (sync: ArenaFullSync) => {
       const ref = arenaStateRef.current;
-      ref.snakes = sync.snakes;
-      ref.pills = sync.pills;
-      ref.timeRemainingS = sync.timeRemainingS;
+      const heads = new Map<string, { x: number; y: number; direction: Direction }>();
+      for (const s of sync.snakes) {
+        if (s.segments.length > 0) {
+          heads.set(s.playerId, { x: s.segments[0].x, y: s.segments[0].y, direction: s.direction });
+        }
+      }
+      const snapshot = { heads, snakes: sync.snakes, pills: sync.pills, timeRemainingS: sync.timeRemainingS };
+      ref.from = snapshot;
+      ref.to = snapshot;
+      ref.interpStart = performance.now();
+      ref.tickDuration = 200;
       ref.round = sync.round;
-      ref.lastTickTime = Date.now();
     },
     "cs:countdown": ({ secondsLeft }: { secondsLeft: number }) => {
       store.setCsCountdown(secondsLeft);
@@ -253,7 +277,7 @@ export default function PlayerGamePage() {
 
         {/* Arena canvas */}
         <div className="flex-1 relative">
-          <ArenaCanvas stateRef={arenaStateRef} myPlayerId={socket.id || undefined} showHUD cameraFollow showMinimap />
+          <ArenaCanvas stateRef={arenaStateRef} myPlayerId={socket.id || undefined} showHUD cameraFollow showMinimap showDebug />
 
           {/* Joystick overlay */}
           <JoystickOverlay onDirection={handleDirection} />

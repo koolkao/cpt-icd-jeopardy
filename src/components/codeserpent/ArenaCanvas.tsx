@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useCallback } from "react";
-import type { SnakeState, CodePill, ArenaEvent } from "@/data/types";
+import type { SnakeState, CodePill, ArenaEvent, Direction } from "@/data/types";
 
 const CELL_SIZE = 20;
 const PLAYER_CELL_SIZE = 25;
@@ -33,16 +33,34 @@ interface Particle {
   size: number;
 }
 
-export interface ArenaStateRef {
+export interface TickSnapshot {
+  heads: Map<string, { x: number; y: number; direction: Direction }>;
   snakes: SnakeState[];
   pills: CodePill[];
   timeRemainingS: number;
+}
+
+export function emptySnapshot(): TickSnapshot {
+  return { heads: new Map(), snakes: [], pills: [], timeRemainingS: 0 };
+}
+
+export interface ArenaDebugStats {
+  tickIntervals: number[];   // last N raw intervals between ticks (ms)
+  tAtArrival: number[];      // last N tickProgress values when new tick arrived
+  tickDuration: number;      // current smoothed duration
+  frameMs: number;           // last frame delta
+}
+
+export interface ArenaStateRef {
+  from: TickSnapshot;
+  to: TickSnapshot;
+  interpStart: number;
+  tickDuration: number;  // smoothed estimate of inter-tick interval (ms)
   round: number;
   totalRounds: number;
   scenarioText: string;
   events: ArenaEvent[];
-  lastTickTime: number;
-  prevSnakeHeads: Map<string, { x: number; y: number }>;
+  debug: ArenaDebugStats;
 }
 
 interface ArenaCanvasProps {
@@ -51,6 +69,7 @@ interface ArenaCanvasProps {
   showHUD?: boolean;
   cameraFollow?: boolean;
   showMinimap?: boolean;
+  showDebug?: boolean;
 }
 
 export default function ArenaCanvas({
@@ -59,6 +78,7 @@ export default function ArenaCanvas({
   showHUD = true,
   cameraFollow = false,
   showMinimap = false,
+  showDebug = false,
 }: ArenaCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>([]);
@@ -93,14 +113,19 @@ export default function ArenaCanvas({
     if (!ctx) return;
 
     const state = stateRef.current;
-    const now = Date.now();
-    const tickMs = 150; // match server tick rate
-    const tickProgress = Math.min(1, (now - state.lastTickTime) / tickMs);
+    const now = performance.now();
+    const wallClock = Date.now(); // for invincibility flash (server uses Date.now())
+    const t = Math.min((now - state.interpStart) / state.tickDuration, 1);
+    // Ease-out quadratic: head decelerates to zero velocity at t=1,
+    // making the brief pause before the next tick imperceptible
+    const tickProgress = 1 - (1 - t) * (1 - t);
 
-    // Delta time for frame-rate independent lerp
-    const dt = lastFrameRef.current ? Math.min(now - lastFrameRef.current, 50) : 16;
+    // Delta time for frame-rate independent camera lerp
+    const rawDt = lastFrameRef.current ? now - lastFrameRef.current : 16;
+    const dt = Math.min(rawDt, 50);
     lastFrameRef.current = now;
     const lerpFactor = 1 - Math.exp(-8 * dt / 1000);
+    state.debug.frameMs = rawDt;
 
     // Process events for particles (fewer in player mode)
     const particleCount = cameraFollow ? 4 : 8;
@@ -119,11 +144,17 @@ export default function ArenaCanvas({
     let camOffsetX = 0;
     let camOffsetY = 0;
     if (cameraFollow && myPlayerId) {
-      const mySnake = state.snakes.find((s) => s.playerId === myPlayerId);
-      if (mySnake && mySnake.segments.length > 0) {
-        const head = mySnake.segments[0];
-        const targetX = head.x * cellSize + cellSize / 2 - canvasW / 2;
-        const targetY = head.y * cellSize + cellSize / 2 - canvasH / 2;
+      const toHead = state.to.heads.get(myPlayerId);
+      const fromHead = state.from.heads.get(myPlayerId);
+      if (toHead) {
+        const headX = fromHead
+          ? fromHead.x + (toHead.x - fromHead.x) * tickProgress
+          : toHead.x;
+        const headY = fromHead
+          ? fromHead.y + (toHead.y - fromHead.y) * tickProgress
+          : toHead.y;
+        const targetX = headX * cellSize + cellSize / 2 - canvasW / 2;
+        const targetY = headY * cellSize + cellSize / 2 - canvasH / 2;
 
         const dx = targetX - cameraRef.current.x;
         const dy = targetY - cameraRef.current.y;
@@ -185,7 +216,7 @@ export default function ArenaCanvas({
     ctx.font = `bold ${pillFontSize}px monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    for (const pill of state.pills) {
+    for (const pill of state.to.pills) {
       if (cameraFollow && (pill.x < visMinCellX || pill.x > visMaxCellX || pill.y < visMinCellY || pill.y > visMaxCellY)) continue;
       const px = pill.x * cellSize;
       const py = pill.y * cellSize;
@@ -208,26 +239,30 @@ export default function ArenaCanvas({
     const eyeOffset = cameraFollow ? 8 : 6;
     const pupilRadius = cameraFollow ? 2 : 1.5;
     const pupilShift = cameraFollow ? 2 : 1.5;
-    for (const snake of state.snakes) {
+    for (const snake of state.to.snakes) {
       if (!snake.alive || snake.segments.length === 0) continue;
 
       const isMe = snake.playerId === myPlayerId;
-      const isInvincible = snake.invincibleUntil > now;
-      const alpha = isInvincible ? 0.5 + 0.3 * Math.sin(now / 100) : 1;
+      const isInvincible = snake.invincibleUntil > wallClock;
+      const alpha = isInvincible ? 0.5 + 0.3 * Math.sin(wallClock / 100) : 1;
 
       for (let i = snake.segments.length - 1; i >= 0; i--) {
         const seg = snake.segments[i];
 
         if (i === 0) {
-          // Head — interpolate position
-          const prevHead = state.prevSnakeHeads.get(snake.playerId);
-          const sx = seg.x * cellSize;
-          const sy = seg.y * cellSize;
-          let drawX = sx;
-          let drawY = sy;
-          if (prevHead) {
-            drawX = (prevHead.x * cellSize) + (sx - prevHead.x * cellSize) * tickProgress;
-            drawY = (prevHead.y * cellSize) + (sy - prevHead.y * cellSize) * tickProgress;
+          // Head — ease-out interpolation between from/to snapshots
+          const fromHead = state.from.heads.get(snake.playerId);
+          const toHead = state.to.heads.get(snake.playerId);
+          const tx = toHead ? toHead.x : seg.x;
+          const ty = toHead ? toHead.y : seg.y;
+          let drawX: number;
+          let drawY: number;
+          if (fromHead) {
+            drawX = (fromHead.x + (tx - fromHead.x) * tickProgress) * cellSize;
+            drawY = (fromHead.y + (ty - fromHead.y) * tickProgress) * cellSize;
+          } else {
+            drawX = tx * cellSize;
+            drawY = ty * cellSize;
           }
 
           ctx.globalAlpha = alpha;
@@ -319,7 +354,7 @@ export default function ArenaCanvas({
     // HUD overlay (drawn in screen/canvas coordinates, not world coordinates)
     if (showHUD) {
       // Timer bar at top
-      const timerFraction = state.timeRemainingS / 60;
+      const timerFraction = state.to.timeRemainingS / 60;
       const barWidth = canvasW * timerFraction;
       ctx.fillStyle = timerFraction > 0.5 ? "#22c55e" : timerFraction > 0.2 ? "#f59e0b" : "#ef4444";
       ctx.fillRect(0, 0, barWidth, 4);
@@ -335,14 +370,14 @@ export default function ArenaCanvas({
       // Time (top-right)
       ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
       ctx.fillRect(canvasW - 60, 6, 60, 24);
-      ctx.fillStyle = state.timeRemainingS <= 10 ? "#ef4444" : "#ffffff";
+      ctx.fillStyle = state.to.timeRemainingS <= 10 ? "#ef4444" : "#ffffff";
       ctx.font = "bold 14px monospace";
       ctx.textAlign = "right";
-      ctx.fillText(`${state.timeRemainingS}s`, canvasW - 8, 23);
+      ctx.fillText(`${state.to.timeRemainingS}s`, canvasW - 8, 23);
 
       // Mini scoreboard (top-center) — host only (skip in cameraFollow mode)
       if (!cameraFollow) {
-        const sorted = [...state.snakes]
+        const sorted = [...state.to.snakes]
           .filter((s) => s.alive || s.segments.length > 0 || s.score !== 0)
           .sort((a, b) => b.score - a.score)
           .slice(0, 5);
@@ -379,15 +414,15 @@ export default function ArenaCanvas({
 
       // Pills as small dots
       ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-      for (const pill of state.pills) {
+      for (const pill of state.to.pills) {
         ctx.fillRect(mmX + pill.x * cellW, mmY + pill.y * cellH, Math.max(1, cellW), Math.max(1, cellH));
       }
 
-      // Snakes as colored dots
-      for (const snake of state.snakes) {
-        if (!snake.alive || snake.segments.length === 0) continue;
-        const head = snake.segments[0];
-        const isMe = snake.playerId === myPlayerId;
+      // Snakes as colored dots (use interpolated heads from to snapshot)
+      for (const [playerId, head] of state.to.heads) {
+        const snake = state.to.snakes.find((s) => s.playerId === playerId);
+        if (!snake || !snake.alive) continue;
+        const isMe = playerId === myPlayerId;
         ctx.fillStyle = isMe ? "#FFCC00" : snake.color;
         const dotSize = isMe ? 3 : 2;
         ctx.beginPath();
@@ -405,8 +440,48 @@ export default function ArenaCanvas({
       ctx.strokeRect(vpX, vpY, vpW, vpH);
     }
 
+    // Debug overlay
+    if (showDebug) {
+      const dbg = state.debug;
+      const intervals = dbg.tickIntervals;
+      const arrivals = dbg.tAtArrival;
+      const avgInterval = intervals.length > 0 ? intervals.reduce((a, b) => a + b, 0) / intervals.length : 0;
+      const minInterval = intervals.length > 0 ? Math.min(...intervals) : 0;
+      const maxInterval = intervals.length > 0 ? Math.max(...intervals) : 0;
+      const avgT = arrivals.length > 0 ? arrivals.reduce((a, b) => a + b, 0) / arrivals.length : 0;
+      const minT = arrivals.length > 0 ? Math.min(...arrivals) : 0;
+      const maxT = arrivals.length > 0 ? Math.max(...arrivals) : 0;
+
+      const lines = [
+        `frm ${dbg.frameMs.toFixed(1)}ms`,
+        `dur ${dbg.tickDuration.toFixed(0)}ms`,
+        `int ${avgInterval.toFixed(0)}[${minInterval.toFixed(0)}-${maxInterval.toFixed(0)}]`,
+        `t@a ${avgT.toFixed(2)}[${minT.toFixed(2)}-${maxT.toFixed(2)}]`,
+        `t=${t.toFixed(2)} e=${tickProgress.toFixed(2)}`,
+      ];
+      const lineH = 16;
+      const boxH = lines.length * lineH + 8;
+      const boxW = 190;
+      const boxX = 4;
+      const boxY = 34;
+
+      ctx.fillStyle = "rgba(0,0,0,0.85)";
+      ctx.fillRect(boxX, boxY, boxW, boxH);
+      ctx.strokeStyle = "#0f0";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(boxX, boxY, boxW, boxH);
+      ctx.fillStyle = "#0f0";
+      ctx.font = "bold 12px monospace";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      lines.forEach((line, i) => {
+        ctx.fillText(line, boxX + 4, boxY + 4 + i * lineH);
+      });
+      ctx.textBaseline = "middle"; // restore
+    }
+
     rafRef.current = requestAnimationFrame(render);
-  }, [stateRef, myPlayerId, showHUD, spawnParticles, cameraFollow, showMinimap, cellSize, canvasW, canvasH, arenaW, arenaH]);
+  }, [stateRef, myPlayerId, showHUD, spawnParticles, cameraFollow, showMinimap, showDebug, cellSize, canvasW, canvasH, arenaW, arenaH]);
 
   useEffect(() => {
     rafRef.current = requestAnimationFrame(render);
