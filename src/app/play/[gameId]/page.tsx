@@ -168,9 +168,9 @@ export default function PlayerGamePage() {
         newHeads.set(ds.playerId, { x: ds.headX, y: ds.headY, direction: ds.direction });
       }
       ref.to = { heads: newHeads, snakes: newSnakes, pills: delta.pills, timeRemainingS: delta.timeRemainingS };
-      // Adaptive tick duration (EMA, clamped to reasonable bounds)
+      // Adaptive tick duration (fast EMA to converge quickly)
       if (elapsed > 50 && elapsed < 500) {
-        ref.tickDuration = ref.tickDuration * 0.8 + elapsed * 0.2;
+        ref.tickDuration = ref.tickDuration * 0.5 + elapsed * 0.5;
       }
       // Debug stats (keep last 30 samples)
       const tAtArrival = Math.min(elapsed / ref.tickDuration, 2);
@@ -194,7 +194,7 @@ export default function PlayerGamePage() {
       ref.from = snapshot;
       ref.to = snapshot;
       ref.interpStart = performance.now();
-      ref.tickDuration = 200;
+      // Don't reset tickDuration — let the EMA keep its adapted value
       ref.round = sync.round;
     },
     "cs:countdown": ({ secondsLeft }: { secondsLeft: number }) => {
