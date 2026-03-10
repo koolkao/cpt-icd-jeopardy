@@ -42,7 +42,7 @@ export default function PlayerGamePage() {
     from: emptySnapshot(),
     to: emptySnapshot(),
     interpStart: performance.now(),
-    tickDuration: 200,
+    tickDuration: 120,
     round: 0,
     totalRounds: 0,
     scenarioText: "",

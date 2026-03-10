@@ -115,10 +115,9 @@ export default function ArenaCanvas({
     const state = stateRef.current;
     const now = performance.now();
     const wallClock = Date.now(); // for invincibility flash (server uses Date.now())
-    const t = Math.min((now - state.interpStart) / state.tickDuration, 1);
-    // Ease-out quadratic: head decelerates to zero velocity at t=1,
-    // making the brief pause before the next tick imperceptible
-    const tickProgress = 1 - (1 - t) * (1 - t);
+    // Linear interpolation — constant velocity within each step looks smoother
+    // for locomotion than ease-out (which creates a visible pulse pattern)
+    const tickProgress = Math.min((now - state.interpStart) / state.tickDuration, 1);
 
     // Delta time for frame-rate independent camera lerp
     const rawDt = lastFrameRef.current ? now - lastFrameRef.current : 16;
@@ -457,7 +456,7 @@ export default function ArenaCanvas({
         `dur ${dbg.tickDuration.toFixed(0)}ms`,
         `int ${avgInterval.toFixed(0)}[${minInterval.toFixed(0)}-${maxInterval.toFixed(0)}]`,
         `t@a ${avgT.toFixed(2)}[${minT.toFixed(2)}-${maxT.toFixed(2)}]`,
-        `t=${t.toFixed(2)} e=${tickProgress.toFixed(2)}`,
+        `t=${tickProgress.toFixed(2)}`,
       ];
       const lineH = 16;
       const boxH = lines.length * lineH + 8;

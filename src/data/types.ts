@@ -341,7 +341,7 @@ export const LK_SPEED_MULTIPLIERS = [
 export const CS_DEFAULT_ARENA_CONFIG: ArenaConfig = {
   gridWidth: 60,
   gridHeight: 40,
-  tickRateMs: 200,
+  tickRateMs: 120,
   roundDurationS: 60,
   countdownS: 5,
   resultsDurationS: 15,
